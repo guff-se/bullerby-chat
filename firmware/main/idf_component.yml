@@ -1,0 +1,15 @@
+dependencies:
+  idf:
+    version: ">=5.5.0"
+
+  # LVGL graphics library
+  lvgl/lvgl:
+    version: "~9.2.0"
+
+  # ESP LVGL port (display driver + task management)
+  espressif/esp_lvgl_port:
+    version: "~2.4.0"
+
+  # GC9A01 round LCD driver
+  espressif/esp_lcd_gc9a01:
+    version: "~2.0.0"

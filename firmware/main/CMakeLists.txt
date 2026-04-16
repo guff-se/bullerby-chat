@@ -1,0 +1,23 @@
+idf_component_register(
+    SRC_DIRS
+        "."
+        "hal"
+        "audio"
+        "ui"
+        "net"
+    INCLUDE_DIRS
+        "."
+        "hal"
+        "audio"
+        "ui"
+        "net"
+    PRIV_REQUIRES
+        driver
+        esp_lcd
+        esp_timer
+        esp_wifi
+        esp_event
+        esp_netif
+        nvs_flash
+        esp_driver_ledc
+)
