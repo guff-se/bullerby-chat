@@ -1,6 +1,7 @@
 #include "audio.h"
 #include "board_config.h"
 #include "es8311.h"
+#include "esp_check.h"
 #include <esp_log.h>
 #include <esp_heap_caps.h>
 #include <driver/i2s_std.h>

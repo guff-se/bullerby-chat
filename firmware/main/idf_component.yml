@@ -10,6 +10,3 @@ dependencies:
 
   espressif/esp_lcd_gc9a01:
     version: "~2.0.0"
-
-  espressif/es8311:
-    version: "*"

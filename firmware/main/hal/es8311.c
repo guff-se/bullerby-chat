@@ -1,5 +1,6 @@
 #include "es8311.h"
 #include "board_config.h"
+#include "esp_check.h"
 #include <esp_log.h>
 #include <driver/gpio.h>
 #include <freertos/FreeRTOS.h>

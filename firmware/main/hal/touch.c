@@ -2,6 +2,7 @@
 
 #include "board_config.h"
 
+#include "esp_check.h"
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "esp_log.h"

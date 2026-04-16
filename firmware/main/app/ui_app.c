@@ -473,7 +473,7 @@ static void on_inbox_back_clicked(lv_event_t *e)
 
 static void inbox_refresh_rows(void)
 {
-    char dur[12];
+    char dur[16];
     for (size_t i = 0; i < model_inbox_count() && i < INBOX_ROWS_MAX; i++) {
         const message_t *m = model_inbox_get(i);
         if (!m || !s_inbox_lbls[i]) {
@@ -590,7 +590,7 @@ static void app_tick_cb(lv_timer_t *t)
 
     if (s_recording_ui_active && s_lbl_record_elapsed && lv_screen_active() == s_scr_record) {
         s_recording_elapsed_ms += 200;
-        char buf[12];
+        char buf[16];
         format_mmss(buf, sizeof(buf), s_recording_elapsed_ms);
         lv_label_set_text(s_lbl_record_elapsed, buf);
         if (s_recording_elapsed_ms >= RECORD_UI_MAX_MS) {
