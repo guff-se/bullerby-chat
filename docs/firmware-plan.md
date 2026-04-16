@@ -1,0 +1,260 @@
+# Bullerby Chat — Firmware Development Plan
+
+This document is the **detailed roadmap for ESP-IDF firmware** only. High-level product
+and server planning live in [project-plan.md](project-plan.md).
+
+**On-device UI design** (family strip, center scale, touch targets, embedded UX):
+[ui-spec.md](ui-spec.md).
+
+**Strategy:** Build the full on-device UX first using **dummy family data** and **no
+network**. Add WiFi, provisioning, and server sync in a later milestone without
+rewriting the UI core.
+
+---
+
+## 1. Goals and constraints
+
+| Goal | Notes |
+|------|--------|
+| **Offline-first** | All screens, audio record/playback, and inbox simulation work without WiFi or a backend. |
+| **Dummy data** | Families (names, icons, ids) are compile-time or small NVS blobs; replace with API later. |
+| **Round UI** | 240×240 circular mask: content stays in the visible disc; avoid critical actions in corners. |
+| **Stable HAL** | Keep `hal/` as thin drivers; app logic and LVGL live above. |
+| **Future-proof** | Clear seams for “config source” (static → server) and “transport” (none → HTTP/WS). |
+
+**Hardware (current codebase):** ESP32-S3, GC9A01 round LCD, CST816D touch, ES8311 codec + I2S, status LED, boot button, battery ADC + charge detect. Pins: `main/hal/hal.h`.
+
+---
+
+## 2. Repository layout (firmware)
+
+| Path | Role |
+|------|------|
+| `firmware/main/main.c` | `app_main`, skeleton UI, WiFi stub, audio loopback task |
+| `firmware/main/hal/` | Hardware abstraction: `display.c`, `touch.c`, `codec.c`, LED/battery helpers in `hal.h` |
+| `firmware/main/CMakeLists.txt` | Sources and `REQUIRES` |
+| `firmware/main/idf_component.yml` | LVGL, esp_lvgl_port, esp_lcd_gc9a01, es8311 |
+| `firmware/partitions.csv` | Dual OTA apps + **8 MB `storage` (SPIFFS)** at `0x800000` — use for offline clips/metadata later |
+
+**Direction:** Split `main.c` into modules as complexity grows, e.g. `ui/`, `app/`, `audio/`, `model/` (see §7).
+
+---
+
+## 3. Current state (baseline)
+
+Already in place:
+
+- GC9A01 + LVGL 9 + esp_lvgl_port (partial buffers, RGB565 byte swap, rotation)
+- CST816D touch → LVGL pointer device; **hardware gesture** register is **read and logged** on change (not yet driving carousel logic)
+- ES8311 + I2S at 24 kHz; **boot-button** hold → record to PSRAM → release → playback (PCM loopback)
+- Battery % + charging flag on screen; **low-battery** tint below `BATTERY_PCT_LOW_WARN` (15%); status LED
+- WiFi STA optional via **`CONFIG_BULLERBY_ENABLE_WIFI`** (off by default in `sdkconfig.defaults`); skeleton SSID/password when on
+- **Model:** `family_t` + dummy families + `ALL`; **`message_t`** + in-memory **inbox** (`model_messages.c`); `model_my_family_id` stub
+- **UI (`ui_app.c`):** **Home** = **horizontal family strip** (five scaled bubbles, continuous pan via `s_strip_scroll_px`, cyclic wrap) + **status** (battery, inbox); **Inbox** list; **Recording** with **Record/Stop** and **30 s max** UI timer (**real** capture still via **BOOT** until wired). **Family zoom** overlay (focal bubble reparented to **`lv_display_get_layer_sys()`**, home screen hidden while open) — **on-glass behaviour still being validated** (see **ui-spec.md §6.2**).
+
+**Gaps for product UX:** Audio pipeline wired to recording UI; Opus + SPIFFS; **animated snap** / rubber band after swipe; **on-device confirmation** that strip-only pan and zoom match **ui-spec** (scroll/LVGL interaction and verification — **§6.2**); sending screen; playback screen.
+
+---
+
+## 4. Architecture overview
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  app/          State machine, screen navigation          │
+│  ui/           LVGL screens (home, record, inbox, …)    │
+│  model/        Families, messages (dummy → NVS/API)      │
+│  audio/        Record/play pipeline, Opus, file I/O      │
+├─────────────────────────────────────────────────────────┤
+│  hal/          display, touch, codec, LED, battery       │
+│  (future) net/ WiFi, HTTP client, WebSocket              │
+└─────────────────────────────────────────────────────────┘
+```
+
+- **UI layer** must not talk to I2S directly; it calls **audio service** APIs (start/stop record, play clip id).
+- **Model** exposes “list families”, “enqueue outgoing”, “list inbox” — backed by static arrays first, then NVS/SPIFFS, then server.
+
+---
+
+## 5. Phased roadmap
+
+### Phase A — HAL polish (short)
+
+Purpose: predictable building blocks for the app layer.
+
+- [ ] **Codec contract:** Document sample rate (24 kHz vs 16 kHz target for Opus); align project-plan (16 kHz) with `AUDIO_SAMPLE_RATE` or resample.
+- [ ] **Optional:** Expose `hal_audio` wrappers around I2S RX/TX + PA instead of raw handles from `main.c`.
+- [ ] **Touch:** Ensure no long I2C work on LVGL task; keep CST816D read in registered callback (already).
+- [ ] **Swipe / gesture probe:** The CST816D exposes a **gesture** register (see `CST816D_REG_GESTURE` in `touch.c`). Build a small test mode or boot-time logging that prints **hardware-reported gesture codes** when the user swipes (up/down/left/right if supported). Goal: verify whether we get **reliable swipe direction** from the chip vs. having to infer swipes from raw coordinate streams in software. If hardware gestures are stable on this board, we can use **horizontal swipes to move between families** on the home screen (carousel / pager) instead of or in addition to a dense icon grid.
+- [x] **Battery:** Low-battery threshold for UI warning — `BATTERY_PCT_LOW_WARN` (15%) in `hal.h`; home status bar turns red when not charging.
+- [x] **WiFi:** `CONFIG_BULLERBY_ENABLE_WIFI` in `sdkconfig` / `sdkconfig.defaults` to disable WiFi for offline dev.
+
+### Phase B — App model (dummy data)
+
+Purpose: one place that defines “who are the families” and “what is a message”.
+
+- [x] **Structs:** `family_t` in `model_families.h`; `message_t` in `model_messages.h` (id, from family, label, duration, unread — extend later with timestamp/storage ref).
+- [x] **Dummy table:** families + `ALL` in `model_families.c`; inbox rows in `model_messages.c`.
+- [x] **“Device identity” stub:** `model_my_family_id` — later from NVS/server.
+- [ ] **Outbox** demo + optional **SPIFFS** for persisted clips (namespaced paths).
+
+### Phase C — UI shell and navigation
+
+Purpose: replace the single test screen with a real navigation stack.
+
+- [x] **Screen manager:** `screen_id_t` + `lv_screen_load` in `ui_app.c` (home, recording, inbox).
+- [x] **Global chrome:** Top bar on home (battery, inbox badge); inbox/recording have back affordances.
+- [ ] **Round layout helpers:** Center content; use `lv_obj_set_style_radius` / clip or large arc container so lists stay inside the circle.
+- [ ] **Fonts:** Pick 1–2 embedded fonts (Latin + optional Nordic); avoid huge TTF in flash — use LVGL’s binary fonts or subset.
+
+**Screens (offline):**
+
+| Screen | Purpose |
+|--------|---------|
+| **Home** | Horizontal **strip** of family bubbles + ALL; drag to pan; tap focal → zoom → record flow |
+| **Recording** | Large record affordance, elapsed time, tap or second tap to stop, cancel |
+| **Sending (fake)** | Short “Sent!” or progress animation (no network — simulate delay) |
+| **Inbox list** | Scrollable list of dummy/received items; badge count on home |
+| **Playback** | Play/pause or auto-play, progress; optional waveform stub |
+
+- [ ] **Transitions:** Simple fade or slide (LVGL anim); keep FPS smooth on partial flush.
+- [ ] **Swipe / pan polish:** Strip **pan** and **zoom** are implemented in code; **on-device** alignment with **ui-spec** (whole-column scroll vs strip-only, zoom z-order and stability) is **open** — see **ui-spec.md §6.2**. Optional: hardware **gesture** bytes drive carousel once validated (Phase A).
+
+### Phase D — Audio product path (offline)
+
+Purpose: match product requirements while staying disconnected.
+
+- [ ] **Recording from UI:** Start/stop from recording screen drives **real** I2S capture (today: **BOOT** only; UI timer is a stub toward max duration, e.g. 30 s).
+- [ ] **Buffer strategy:** PSRAM ring or fixed buffer; stop cleanly on max time or user stop.
+- [ ] **Opus:** Encode pipeline (ESP-ADF or `libopus` component); store `.opus` blobs on SPIFFS or raw PCM first then convert.
+- [ ] **Playback:** Decode Opus → I2S; enable PA only during play.
+- [ ] **Simulated receive:** Button, menu action, or timer injects a “new message” into inbox pointing at a bundled sample or last recording — exercises notification + list + play.
+
+### Phase E — Storage and persistence
+
+The partition table already has **8 MB SPIFFS** (`storage`).
+
+- [ ] **Mount SPIFFS** at boot (or FAT if you switch partition type later).
+- [ ] **File naming:** e.g. `/storage/msg_<uuid>.opus` + small JSON sidecar or fixed binary index in NVS.
+- [ ] **Retention policy:** **Short FIFO** for received clips — **delete after listen**; optional small cap (count/MB/age) so SPIFFS does not fill. Aligns with [project-plan.md](project-plan.md) (instant intercom, not archive).
+- [ ] **Wear / errors:** Handle full SPIFFS gracefully in UI.
+
+### Phase F — Feedback and edge cases
+
+- [ ] **LED patterns:** Solid / blink for recording, new message, charging (define table).
+- [ ] **Sounds:** Optional short beeps via short PCM buffers (codec init cost vs UX).
+- [ ] **Power:** Screen blanking / brightness curve (backlight PWM already in `display.c` path).
+- [ ] **Concurrency:** One audio operation at a time; mutex between UI and `audio_task`.
+
+### Phase G — Networking (later; not blocking offline work)
+
+- [ ] **NVS config:** WiFi SSID/password, server base URL (`https://…` / `wss://…`), device id, shared secret — **schema only** early.
+- [ ] **WiFi manager:** Connect, reconnect, status for UI indicator.
+- [ ] **HTTP(S) + WebSocket:** Match **`server/README.md`** — `GET /api/devices/{id}/config`, `POST /api/messages` (multipart), `GET /api/ws` + JSON heartbeat / `new_message` + signed `GET .../audio` — behind `#ifdef` or separate task.
+- [ ] **OTA:** Second OTA slot already in partition table; add HTTPS OTA when packaging exists.
+
+**Server reference:** Production API is implemented in **`server/`** (see **`docs/project-plan.md` §3**). Before changing server behaviour, run **`cd server && npm test`** (see **`server/README.md`**).
+
+---
+
+## 6. UI / UX specifics (round display)
+
+Authoritative layout and interaction rules: **[ui-spec.md](ui-spec.md)**.
+
+- **Safe area:** Treat center ~220 px diameter as primary; outer ring for subtle chrome only.
+- **Touch targets:** Minimum ~44 px for kids; larger for main actions.
+- **Family grid:** e.g. 2×3 or hex layout; **ALL** visually distinct (color/icon).
+- **Swipe between families (optional):** After validating CST816D-reported swipes (Phase A), consider a **pager** UI: one large family tile per screen, **swipe left/right** to change family, **tap** to record. Reduces clutter on a small round display; confirm gestures do not misfire when kids tap.
+- **Recording:** Clear “recording” state (red dot, timer); block accidental navigation.
+- **Vibe:** Playful, colorful, wacky—see [ui-spec.md](ui-spec.md) (neighborhood kids, not corporate a11y).
+
+---
+
+## 7. Suggested module split (refactor from skeleton)
+
+When `main.c` grows, extract:
+
+| Module | Contents |
+|--------|----------|
+| `app_state.c` | Current screen, inbox count, whether recording |
+| `ui_home.c` | Home grid LVGL |
+| `ui_record.c` | Recording screen |
+| `ui_inbox.c` | List + playback |
+| `model_families.c` | Dummy data + accessors |
+| `audio_service.c` | Tasks, Opus, SPIFFS I/O |
+| `storage_msgs.c` | SPIFFS index + delete |
+
+Keep `hal_*` as-is; only extend when hardware changes.
+
+---
+
+## 8. Dependencies to add (when needed)
+
+| Need | Component |
+|------|-----------|
+| Opus encode/decode | `libopus` / esp-opus or ADF patterns |
+| SPIFFS | `esp_spiffs` / `spiffs` in IDF |
+| JSON metadata | `cJSON` (IDF component) |
+| TLS client | `esp_http_client` + mbedTLS (Phase G) |
+
+Track in `idf_component.yml` or IDF component manager as you integrate.
+
+---
+
+## 9. Testing and quality
+
+| Layer | Approach |
+|-------|----------|
+| **On device** | Serial logs, LVGL assert, stack watermark (`uxTaskGetStackHighWaterMark`) |
+| **Audio** | Loopback first; then file play; finally Opus round-trip |
+| **Long run** | Soak test: repeated record/play, SPIFFS fill, thermal check |
+| **Regression** | Tag firmware versions when UI milestones land |
+| **Touch / swipe** | Log gesture codes from CST816D; try slow vs fast swipes, edges of the round panel; decide software fallback (LVGL gesture on coordinates) if hardware is unreliable |
+
+---
+
+## 10. Build, flash, monitor
+
+```bash
+cd firmware
+. ~/esp/esp-idf/export.sh   # or your IDF path
+idf.py set-target esp32s3
+idf.py build
+idf.py -p /dev/cu.usbmodemXXXX flash monitor
+```
+
+Use **`idf.py menuconfig`** for PSRAM, CPU frequency, and optional WiFi disable.
+
+---
+
+## 11. Risks and mitigations
+
+| Risk | Mitigation |
+|------|------------|
+| Flash/PSRAM pressure with LVGL + Opus | Measure; tune LVGL buffer size; strip fonts |
+| SPIFFS full | Quotas + UI message |
+| Audio underruns | Correct buffer sizes; raise I2S task priority carefully |
+| UI thread blocking | Never block LVGL task; use queues to audio task |
+| Round clip bugs | Test scrollable content early |
+
+---
+
+## 12. Checklist summary (offline milestone)
+
+- [x] Dummy families + message model
+- [x] Navigation + home / recording / inbox (dedicated **playback** screen still TODO)
+- [ ] Record/stop from UI + max duration (**codec** — UI timer exists as stub)
+- [ ] Opus + SPIFFS persistence (or PCM interim)
+- [ ] Simulated incoming message path
+- [ ] LED + battery warnings
+- [ ] Optional: WiFi stripped from default build for dev
+- [ ] CST816D swipe/gesture evaluation documented; optional pager UX if stable
+
+When this list is done, you are ready to attach **Phase G** networking without changing the fundamental UI flow.
+
+---
+
+## 13. Related docs
+
+- [project-plan.md](project-plan.md) — product scope, server API (§3), infrastructure
+- [server/README.md](../server/README.md) — HTTP/WebSocket contract and Wrangler deploy
+- [ui-spec.md](ui-spec.md) — family strip carousel, touch targets, embedded UX

@@ -1,0 +1,2 @@
+# Copy to .dev.vars (gitignored). Required for authenticated API:
+BULLERBY_DEVICE_SECRET=

@@ -5,12 +5,16 @@ idf_component_register(
         "audio"
         "ui"
         "net"
+        "app"
+        "model"
     INCLUDE_DIRS
         "."
         "hal"
         "audio"
         "ui"
         "net"
+        "app"
+        "model"
     PRIV_REQUIRES
         driver
         esp_lcd
@@ -20,4 +24,7 @@ idf_component_register(
         esp_netif
         nvs_flash
         esp_driver_ledc
+        esp_adc
+        spi_flash
+        app_update
 )

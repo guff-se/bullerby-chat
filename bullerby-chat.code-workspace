@@ -1,0 +1,16 @@
+{
+  "folders": [
+    {
+      "path": ".",
+      "name": "bullerby-chat"
+    },
+    {
+      "path": "firmware",
+      "name": "firmware (ESP-IDF)"
+    }
+  ],
+  "settings": {},
+  "extensions": {
+    "recommendations": ["espressif.esp-idf-extension"]
+  }
+}

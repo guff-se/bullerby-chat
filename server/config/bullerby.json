@@ -1,0 +1,10 @@
+{
+  "families": [
+    { "id": "family-a", "name": "Family A", "icon": "A" },
+    { "id": "family-b", "name": "Family B", "icon": "B" }
+  ],
+  "devices": [
+    { "id": "device-uuid-001", "family_id": "family-a" },
+    { "id": "device-uuid-002", "family_id": "family-b" }
+  ]
+}

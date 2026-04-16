@@ -1,5 +1,7 @@
 # Hardware: AI Voice Chat Robot (ESP32-S3 1.28" LCD)
 
+**UI:** Interface design for the round display is specified in [ui-spec.md](ui-spec.md).
+
 ## Product Listing
 
 AI Voice Chat Robot 1.28In LCD Screen ESP32-S3 Development Board Smart DeepSeek

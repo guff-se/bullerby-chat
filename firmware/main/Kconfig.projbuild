@@ -1,0 +1,10 @@
+menu "Bullerby Chat"
+
+    config BULLERBY_ENABLE_WIFI
+        bool "Enable WiFi skeleton (STA with hardcoded credentials)"
+        default n
+        help
+            When disabled, the firmware skips WiFi and netif init — recommended for
+            offline UI/audio work (less power use and serial noise).
+
+endmenu

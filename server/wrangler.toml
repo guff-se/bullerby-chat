@@ -1,0 +1,14 @@
+# Bullerby Chat — Cloudflare Worker + Durable Object (relay / WebSocket hub).
+# Deploy: see README.md in this directory.
+
+name = "bullerby-chat"
+main = "src/index.ts"
+compatibility_date = "2025-04-01"
+
+[durable_objects]
+bindings = [{ name = "RELAY", class_name = "RelayRoom" }]
+
+# Free plan: Durable Objects must be SQLite-backed (not `new_classes`).
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RelayRoom"]

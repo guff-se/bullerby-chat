@@ -1,0 +1,21 @@
+{
+  "name": "bullerby-chat-server",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "test": "vitest run",
+    "test:e2e": "node scripts/run-e2e-with-dev.mjs",
+    "test:e2e:only": "node scripts/e2e-full.mjs",
+    "test:watch": "vitest",
+    "predeploy": "npm run test",
+    "deploy": "wrangler deploy",
+    "types": "wrangler types"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.14.7",
+    "typescript": "^5.7.3",
+    "vitest": "^4.1.4",
+    "wrangler": "^4.0.0",
+    "ws": "^8.20.0"
+  }
+}
