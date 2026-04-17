@@ -50,6 +50,9 @@ static const char *TAG = "ui_app";
 
 /** Focal family zoom: main bubble (leave room for three rim icon buttons on the disc). */
 #define ZOOM_BUBBLE_SIZE 208
+/** transform_scale initial value (≈ focal bubble size / zoom size * 256) to feel like a continuing grow. */
+#define ZOOM_SCALE_FROM 120
+#define ZOOM_SCALE_TO   256  /* LV_SCALE_NONE */
 
 typedef enum {
     SCREEN_HOME = 0,
@@ -62,13 +65,14 @@ static lv_obj_t *s_home_disc;
 static lv_obj_t *s_scr_record;
 static lv_obj_t *s_scr_inbox;
 
-/** Full-screen overlay on home: focal bubble is reparented here (same widget, not a duplicate). */
-static lv_obj_t *s_zoom_layer;
+/** Dedicated zoom screen (not a sys_layer overlay — screens reliably stack above each other). */
+static lv_obj_t *s_scr_zoom;
+static lv_obj_t *s_zoom_bubble;
+static lv_obj_t *s_zoom_lbl;
 static lv_obj_t *s_zoom_btn_play;
 static lv_obj_t *s_zoom_btn_stop;
 static lv_obj_t *s_zoom_btn_back;
 static size_t s_zoom_family_index = 0;
-static bool s_zoom_active = false;
 
 static lv_obj_t *s_lbl_batt;
 static lv_obj_t *s_lbl_inbox;
@@ -149,6 +153,24 @@ static void strip_wrap_scroll(void)
     }
 }
 
+/**
+ * Size at fractional distance |d| from focal (d in units of slots).
+ * Piecewise linear key points: (0,98), (1,68), (2,50); clamped to 50 beyond.
+ * Returns diameter in pixels.
+ */
+static int strip_size_at(int d_tenths_abs)
+{
+    if (d_tenths_abs >= 20) {
+        return 50;
+    }
+    if (d_tenths_abs >= 10) {
+        /* 68 → 50 as d_tenths goes 10 → 20 */
+        return 68 - (18 * (d_tenths_abs - 10)) / 10;
+    }
+    /* 98 → 68 as d_tenths goes 0 → 10 */
+    return 98 - (30 * d_tenths_abs) / 10;
+}
+
 static void strip_refresh(void)
 {
     size_t n = model_family_count();
@@ -156,16 +178,18 @@ static void strip_refresh(void)
         return;
     }
 
-    const int diam[STRIP_NUM_SLOTS] = { 50, 68, 98, 68, 50 };
-    /* Symmetric centers inside 220px-wide strip (padding from disc edge). */
-    const int16_t cx[STRIP_NUM_SLOTS] = { 30, 74, 110, 146, 190 };
-    const int16_t strip_h = STRIP_ROW_H;
-    const int16_t cy = strip_h / 2;
+    const int16_t focal_cx = 110;  /* center of focal slot inside strip_container */
+    const int16_t cy = STRIP_ROW_H / 2;
+
+    /* Each slot's content shifts with s_strip_scroll_px so bubbles flow through positions;
+     * size interpolates continuously so focal always reads as the biggest on glass. */
+    int d_tenths_abs[STRIP_NUM_SLOTS];
 
     for (int slot = 0; slot < STRIP_NUM_SLOTS; slot++) {
         lv_obj_t *b = s_strip_bubbles[slot];
         lv_obj_t *lb = s_strip_labels[slot];
         if (!b || !lb || lv_obj_get_parent(b) != s_strip_container) {
+            d_tenths_abs[slot] = 99;
             continue;
         }
 
@@ -174,13 +198,19 @@ static void strip_refresh(void)
 
         const family_t *f = model_family_by_index(fi);
         if (!f) {
+            d_tenths_abs[slot] = 99;
             continue;
         }
 
-        int d = diam[slot];
-        lv_obj_set_size(b, d, d);
-        lv_coord_t bx = (lv_coord_t)(cx[slot] + s_strip_scroll_px - d / 2);
-        lv_obj_set_pos(b, bx, (lv_coord_t)(cy - d / 2));
+        /* d in tenths-of-slot (integer math): d = rel + scroll_px/STEP. */
+        int d_t = rel * 10 + (s_strip_scroll_px * 10) / STRIP_PX_PER_STEP;
+        int d_abs = d_t < 0 ? -d_t : d_t;
+        d_tenths_abs[slot] = d_abs;
+
+        int dia = strip_size_at(d_abs);
+        lv_obj_set_size(b, dia, dia);
+        lv_coord_t bx = (lv_coord_t)(focal_cx + rel * STRIP_PX_PER_STEP + s_strip_scroll_px - dia / 2);
+        lv_obj_set_pos(b, bx, (lv_coord_t)(cy - dia / 2));
 
         lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
         lv_obj_set_style_bg_color(b, lv_color_hex(family_bubble_color(f)), 0);
@@ -188,57 +218,35 @@ static void strip_refresh(void)
         lv_obj_set_style_border_width(b, f->is_broadcast ? 4 : 2, 0);
         lv_obj_set_style_border_color(b, lv_color_hex(0xffffff), 0);
         lv_obj_set_style_border_opa(b, f->is_broadcast ? LV_OPA_COVER : LV_OPA_50, 0);
-        lv_obj_set_style_shadow_width(b, slot == STRIP_FOCAL_IDX ? 12 : 4, 0);
+        lv_obj_set_style_shadow_width(b, d_abs < 5 ? 12 : 4, 0);
         lv_obj_set_style_shadow_ofs_y(b, 3, 0);
         lv_obj_set_style_shadow_color(b, lv_color_hex(0x000000), 0);
         lv_obj_set_style_shadow_opa(b, LV_OPA_30, 0);
 
         lv_label_set_text(lb, f->abbr);
         lv_obj_set_style_text_color(lb, lv_color_hex(0xffffff), 0);
-        /* Slightly smaller feel on side slots without another font: pad label. */
         lv_obj_center(lb);
     }
 
-    /* Draw order: farther from screen center = back; nearest (usually focal) = front. */
-    {
-        int32_t dist_sq[STRIP_NUM_SLOTS];
-        int order[STRIP_NUM_SLOTS];
-        const lv_coord_t scx = LCD_H_RES / 2;
-        const lv_coord_t scy = LCD_V_RES / 2;
-
-        for (int i = 0; i < STRIP_NUM_SLOTS; i++) {
-            lv_obj_t *bi = s_strip_bubbles[i];
-            if (lv_obj_get_parent(bi) != s_strip_container) {
-                dist_sq[i] = -1;
-                order[i] = i;
-                continue;
-            }
-            lv_area_t aa;
-            lv_obj_get_coords(bi, &aa);
-            lv_coord_t bx = (lv_coord_t)((aa.x1 + aa.x2) / 2);
-            lv_coord_t by = (lv_coord_t)((aa.y1 + aa.y2) / 2);
-            int32_t dx = (int32_t)(bx - scx);
-            int32_t dy = (int32_t)(by - scy);
-            dist_sq[i] = dx * dx + dy * dy;
-            order[i] = i;
-        }
-        for (int i = 0; i < STRIP_NUM_SLOTS - 1; i++) {
-            for (int j = i + 1; j < STRIP_NUM_SLOTS; j++) {
-                int32_t di = dist_sq[order[i]];
-                int32_t dj = dist_sq[order[j]];
-                if (dj > di) {
-                    int t = order[i];
-                    order[i] = order[j];
-                    order[j] = t;
-                }
+    /* Z-order: smallest |d| on top so whatever is visually closest to focal draws frontmost. */
+    int order[STRIP_NUM_SLOTS];
+    for (int i = 0; i < STRIP_NUM_SLOTS; i++) {
+        order[i] = i;
+    }
+    for (int i = 0; i < STRIP_NUM_SLOTS - 1; i++) {
+        for (int j = i + 1; j < STRIP_NUM_SLOTS; j++) {
+            if (d_tenths_abs[order[j]] > d_tenths_abs[order[i]]) {
+                int t = order[i];
+                order[i] = order[j];
+                order[j] = t;
             }
         }
-        for (int k = 0; k < STRIP_NUM_SLOTS; k++) {
-            if (dist_sq[order[k]] < 0) {
-                continue;
-            }
-            lv_obj_move_foreground(s_strip_bubbles[order[k]]);
+    }
+    for (int k = 0; k < STRIP_NUM_SLOTS; k++) {
+        if (d_tenths_abs[order[k]] >= 99) {
+            continue;
         }
+        lv_obj_move_foreground(s_strip_bubbles[order[k]]);
     }
 }
 
@@ -256,11 +264,47 @@ static void home_reset_scroll_offsets(void)
     }
 }
 
+/** Animation exec: update scroll_px (without wrapping) and re-render — used for snap-back / commit. */
+static void strip_snap_anim_exec(void *var, int32_t v)
+{
+    (void)var;
+    s_strip_scroll_px = v;
+    strip_refresh();
+}
+
+/**
+ * On finger release, decide whether the partial drag should commit to the next slot or spring back,
+ * then animate scroll_px → 0 so items glide into their resting positions instead of snapping.
+ */
+static void strip_snap_release(void)
+{
+    size_t n = model_family_count();
+    int32_t from = s_strip_scroll_px;
+    const int32_t commit_threshold = STRIP_PX_PER_STEP / 3;
+
+    if (n > 0 && from > commit_threshold) {
+        /* Finger moved right past the commit threshold → show previous family as focal. */
+        s_carousel_idx = (s_carousel_idx + n - 1) % n;
+        from -= STRIP_PX_PER_STEP;
+    } else if (n > 0 && from < -commit_threshold) {
+        s_carousel_idx = (s_carousel_idx + 1) % n;
+        from += STRIP_PX_PER_STEP;
+    }
+    s_strip_scroll_px = from;
+
+    lv_anim_del(NULL, strip_snap_anim_exec);
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, s_strip_container);
+    lv_anim_set_values(&a, from, 0);
+    lv_anim_set_duration(&a, 180);
+    lv_anim_set_exec_cb(&a, strip_snap_anim_exec);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_start(&a);
+}
+
 static void strip_drag_cb(lv_event_t *e)
 {
-    if (s_zoom_active) {
-        return;
-    }
     lv_event_code_t code = lv_event_get_code(e);
     lv_indev_t *indev = lv_event_get_indev(e);
     if (indev == NULL) {
@@ -274,6 +318,8 @@ static void strip_drag_cb(lv_event_t *e)
     lv_indev_get_point(indev, &pt);
 
     if (code == LV_EVENT_PRESSED) {
+        /* Kill any in-flight snap so new drag starts from current visual position. */
+        lv_anim_del(NULL, strip_snap_anim_exec);
         home_reset_scroll_offsets();
         s_drag_last_x = pt.x;
         s_drag_abs_sum = 0;
@@ -296,8 +342,7 @@ static void strip_drag_cb(lv_event_t *e)
 
     if (code == LV_EVENT_RELEASED) {
         strip_wrap_scroll();
-        s_strip_scroll_px = 0;
-        strip_refresh();
+        strip_snap_release();
     }
 }
 
@@ -349,28 +394,41 @@ static void family_bubble_apply_family(const family_t *f, lv_obj_t *bubble, lv_o
     lv_label_set_text(lbl, f->abbr);
 }
 
+/** transform_scale animation exec used when the zoom screen first appears. */
+static void zoom_scale_anim_exec(void *var, int32_t v)
+{
+    lv_obj_set_style_transform_scale((lv_obj_t *)var, (int32_t)v, 0);
+}
+
+static void on_zoom_screen_loaded(lv_event_t *e)
+{
+    (void)e;
+    if (!s_zoom_bubble) {
+        return;
+    }
+    lv_anim_del(s_zoom_bubble, zoom_scale_anim_exec);
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, s_zoom_bubble);
+    lv_anim_set_values(&a, ZOOM_SCALE_FROM, ZOOM_SCALE_TO);
+    lv_anim_set_duration(&a, 220);
+    lv_anim_set_exec_cb(&a, zoom_scale_anim_exec);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_start(&a);
+}
+
 static void zoom_close(void)
 {
-    if (!s_zoom_active) {
+    if (!s_scr_home) {
         return;
     }
-    if (!s_zoom_layer || !s_strip_container || !s_scr_home) {
-        s_zoom_active = false;
-        return;
-    }
-    s_zoom_active = false;
-    lv_obj_t *b = s_strip_bubbles[STRIP_FOCAL_IDX];
-    lv_obj_set_parent(b, s_strip_container);
-    lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_flag(s_zoom_layer, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(s_scr_home, LV_OBJ_FLAG_HIDDEN);
-    strip_refresh();
+    lv_screen_load_anim(s_scr_home, LV_SCR_LOAD_ANIM_FADE_ON, 180, 0, false);
 }
 
 static void zoom_open(size_t fi)
 {
     size_t n = model_family_count();
-    if (n == 0 || !s_zoom_layer) {
+    if (n == 0 || !s_scr_zoom || !s_zoom_bubble || !s_zoom_lbl) {
         return;
     }
     if (fi >= n) {
@@ -382,44 +440,18 @@ static void zoom_open(size_t fi)
     }
 
     s_zoom_family_index = fi;
-    s_zoom_active = true;
+    family_bubble_apply_family(f, s_zoom_bubble, s_zoom_lbl);
+    lv_obj_center(s_zoom_lbl);
 
-    lv_obj_t *b = s_strip_bubbles[STRIP_FOCAL_IDX];
-    lv_obj_t *lb = s_strip_labels[STRIP_FOCAL_IDX];
-    lv_obj_set_parent(b, s_zoom_layer);
-    lv_obj_remove_style_all(b);
-    lv_obj_set_size(b, ZOOM_BUBBLE_SIZE, ZOOM_BUBBLE_SIZE);
-    lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
-    lv_obj_set_style_shadow_width(b, 16, 0);
-    lv_obj_set_style_shadow_ofs_y(b, 5, 0);
-    lv_obj_set_style_shadow_color(b, lv_color_hex(0x000000), 0);
-    lv_obj_set_style_shadow_opa(b, LV_OPA_30, 0);
-    lv_obj_clear_flag(b, LV_OBJ_FLAG_CLICKABLE);
-    family_bubble_apply_family(f, b, lb);
-    lv_obj_center(lb);
-    lv_obj_align(b, LV_ALIGN_CENTER, 0, -18);
+    /* Preset small so the on-screen-loaded callback animates it growing in. */
+    lv_obj_set_style_transform_scale(s_zoom_bubble, ZOOM_SCALE_FROM, 0);
 
-    /* Hide the whole home screen so only the sys-layer zoom draws (no “second circle” behind). */
-    lv_obj_add_flag(s_scr_home, LV_OBJ_FLAG_HIDDEN);
-
-    lv_obj_clear_flag(s_zoom_layer, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(s_zoom_btn_back);
-    lv_obj_move_foreground(s_zoom_btn_play);
-    lv_obj_move_foreground(s_zoom_btn_stop);
-    lv_obj_move_foreground(s_zoom_layer);
-    strip_refresh();
+    lv_screen_load_anim(s_scr_zoom, LV_SCR_LOAD_ANIM_FADE_ON, 180, 0, false);
 }
 
 static void show_screen(screen_id_t id)
 {
-    if (s_zoom_active && id != SCREEN_HOME) {
-        zoom_close();
-    }
     if (id == SCREEN_HOME) {
-        if (s_zoom_active) {
-            zoom_close();
-        }
         lv_screen_load(s_scr_home);
     } else if (id == SCREEN_INBOX) {
         lv_screen_load(s_scr_inbox);
@@ -564,12 +596,6 @@ static void app_tick_cb(lv_timer_t *t)
     (void)t;
 
     if (!lvgl_port_lock(0)) {
-        return;
-    }
-
-    /* Avoid invalidating the hidden home screen every 200 ms while zoom is open (reduces flicker). */
-    if (s_zoom_active) {
-        lvgl_port_unlock();
         return;
     }
 
@@ -845,28 +871,40 @@ static void build_home(void)
 }
 
 /**
- * Fullscreen overlay on the display **system** layer (drawn after top_layer and act_scr in lv_refr).
- * Using top_layer alone still composites under some cases; sys_layer is always last before flush.
+ * Dedicated zoom screen: standard lv_screen_load flow guarantees it draws above home without
+ * relying on sys_layer compositing quirks. Bubble is a fresh object (no reparenting).
  */
-static void build_zoom_layer(lv_display_t *disp)
+static void build_zoom_screen(void)
 {
-    lv_obj_t *layer = lv_display_get_layer_sys(disp);
-    s_zoom_layer = lv_obj_create(layer);
-    lv_obj_remove_style_all(s_zoom_layer);
-    lv_obj_set_size(s_zoom_layer, LCD_H_RES, LCD_V_RES);
-    /* Strong hue shift vs home (0x1e1a3a) + rim so zoom is unmistakable on round glass. */
-    lv_obj_set_style_bg_color(s_zoom_layer, lv_color_hex(0x0a1a0a), 0);
-    lv_obj_set_style_bg_opa(s_zoom_layer, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(s_zoom_layer, 4, 0);
-    lv_obj_set_style_border_color(s_zoom_layer, lv_color_hex(0xff6622), 0);
-    lv_obj_set_style_border_opa(s_zoom_layer, LV_OPA_COVER, 0);
-    lv_obj_set_style_pad_all(s_zoom_layer, 0, 0);
-    lv_obj_align(s_zoom_layer, LV_ALIGN_TOP_LEFT, 0, 0);
-    lv_obj_add_flag(s_zoom_layer, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(s_zoom_layer, LV_OBJ_FLAG_CLICKABLE);
-    style_no_scroll_chrome(s_zoom_layer);
+    s_scr_zoom = lv_obj_create(NULL);
+    style_round_screen(s_scr_zoom);
+    lv_obj_add_event_cb(s_scr_zoom, on_zoom_screen_loaded, LV_EVENT_SCREEN_LOADED, NULL);
 
-    s_zoom_btn_back = lv_button_create(s_zoom_layer);
+    s_zoom_bubble = lv_obj_create(s_scr_zoom);
+    lv_obj_remove_style_all(s_zoom_bubble);
+    lv_obj_set_size(s_zoom_bubble, ZOOM_BUBBLE_SIZE, ZOOM_BUBBLE_SIZE);
+    lv_obj_set_style_radius(s_zoom_bubble, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(s_zoom_bubble, LV_OPA_COVER, 0);
+    lv_obj_set_style_shadow_width(s_zoom_bubble, 16, 0);
+    lv_obj_set_style_shadow_ofs_y(s_zoom_bubble, 5, 0);
+    lv_obj_set_style_shadow_color(s_zoom_bubble, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_shadow_opa(s_zoom_bubble, LV_OPA_30, 0);
+    /* Scale from the bubble's own center so the grow-in looks like a zoom, not a slide. */
+    lv_obj_set_style_transform_pivot_x(s_zoom_bubble, ZOOM_BUBBLE_SIZE / 2, 0);
+    lv_obj_set_style_transform_pivot_y(s_zoom_bubble, ZOOM_BUBBLE_SIZE / 2, 0);
+    lv_obj_set_style_transform_scale(s_zoom_bubble, ZOOM_SCALE_FROM, 0);
+    lv_obj_align(s_zoom_bubble, LV_ALIGN_CENTER, 0, -18);
+    lv_obj_clear_flag(s_zoom_bubble, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(s_zoom_bubble, LV_OBJ_FLAG_SCROLLABLE);
+
+    s_zoom_lbl = lv_label_create(s_zoom_bubble);
+    lv_label_set_text(s_zoom_lbl, "?");
+    style_label_clear(s_zoom_lbl);
+    lv_obj_set_style_text_color(s_zoom_lbl, lv_color_hex(0xffffff), 0);
+    lv_obj_set_style_text_font(s_zoom_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_center(s_zoom_lbl);
+
+    s_zoom_btn_back = lv_button_create(s_scr_zoom);
     style_icon_round_button(s_zoom_btn_back, 0x2a2840);
     lv_obj_t *zlb = lv_label_create(s_zoom_btn_back);
     lv_label_set_text(zlb, LV_SYMBOL_LEFT);
@@ -875,7 +913,7 @@ static void build_zoom_layer(lv_display_t *disp)
     lv_obj_center(zlb);
     lv_obj_align(s_zoom_btn_back, LV_ALIGN_CENTER, -76, 44);
 
-    s_zoom_btn_play = lv_button_create(s_zoom_layer);
+    s_zoom_btn_play = lv_button_create(s_scr_zoom);
     style_icon_round_button(s_zoom_btn_play, 0x2d6a3d);
     lv_obj_t *zlp = lv_label_create(s_zoom_btn_play);
     lv_label_set_text(zlp, LV_SYMBOL_PLAY);
@@ -884,7 +922,7 @@ static void build_zoom_layer(lv_display_t *disp)
     lv_obj_center(zlp);
     lv_obj_align(s_zoom_btn_play, LV_ALIGN_CENTER, 0, 76);
 
-    s_zoom_btn_stop = lv_button_create(s_zoom_layer);
+    s_zoom_btn_stop = lv_button_create(s_scr_zoom);
     style_icon_round_button(s_zoom_btn_stop, 0x6a2d2d);
     lv_obj_t *zls = lv_label_create(s_zoom_btn_stop);
     lv_label_set_text(zls, LV_SYMBOL_STOP);
@@ -896,8 +934,6 @@ static void build_zoom_layer(lv_display_t *disp)
     lv_obj_add_event_cb(s_zoom_btn_back, on_zoom_back_clicked, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(s_zoom_btn_play, on_zoom_play_clicked, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(s_zoom_btn_stop, on_zoom_stop_clicked, LV_EVENT_CLICKED, NULL);
-
-    lv_obj_move_foreground(s_zoom_layer);
 }
 
 static void build_recording(void)
@@ -1033,14 +1069,15 @@ esp_err_t ui_app_init(lv_display_t *disp)
 {
     ESP_LOGI(TAG, "Building UI (%u families)", (unsigned)model_family_count());
     /* Changes every compile — grep binary or serial log to prove this .elf was flashed. */
-    ESP_LOGI(TAG, "ui_app build stamp: %s %s (overlay zoom, reparent focal)", __DATE__, __TIME__);
+    ESP_LOGI(TAG, "ui_app build stamp: %s %s (zoom screen, interpolated strip)", __DATE__, __TIME__);
 
     if (!lvgl_port_lock(0)) {
         return ESP_ERR_TIMEOUT;
     }
 
+    (void)disp;
     build_home();
-    build_zoom_layer(disp);
+    build_zoom_screen();
     build_recording();
     build_inbox();
     lv_screen_load(s_scr_home);

@@ -2306,11 +2306,6 @@ CONFIG_CU_DIAGNOSTICS_COLOR_ALWAYS=y
 # end of CMake Utilities
 
 #
-# ESP LVGL PORT
-#
-# end of ESP LVGL PORT
-
-#
 # LVGL configuration
 #
 CONFIG_LV_CONF_SKIP=y
