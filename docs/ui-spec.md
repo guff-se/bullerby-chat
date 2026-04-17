@@ -1,187 +1,208 @@
-# Bullerby Chat — UI Specification
+# Bullerby Chat — UI Specification (v2: Wacky Kids Ring)
 
-This document defines **on-device interface design** for the ESP32-S3 round display
-(240×240). Implementation lives in firmware (LVGL); see
-[firmware-plan.md](firmware-plan.md).
+This document defines the **on-device interface** for the ESP32-S3 round display
+(240×240). Implementation lives in `firmware/main/app/ui_app.c` (LVGL 9).
 
-**Related:** [project-plan.md](project-plan.md) (product scope),
-[product-description.md](product-description.md) (hardware).
+**Related:** [project-plan.md](project-plan.md) · [firmware-plan.md](firmware-plan.md) ·
+[product-description.md](product-description.md)
 
 ---
 
 ## Design personality (read this first)
 
-This is for **neighborhood kids**, not a hospital kiosk or a bank app.
+This is for **neighborhood kids**. Loud, weird, joyful. Clashing neons, bouncy
+motion, goofy transitions — **features, not bugs**. If a choice is "more fun" vs
+"more restrained", choose fun.
 
-**Aim for:** **playful**, **wacky**, **colorful**—big energy, silly where it helps, **joy over polish**. Clashing hues, gradients, goofy icons, bouncy motion, and “why not?” flourishes are **features**, not bugs.
-
-**We are not** optimizing for formal **accessibility checklists** (WCAG-style contrast rules, color-blind-only cues, sober motion reduction). If something feels funnier loud and weird, **bias that way**. Use sound, LED, and motion freely when it makes the thing feel alive.
-
-**Still real:** the screen is tiny and the CPU is not a phone—see **§3** for **hardware limits** only (so the UI stays responsive and shippable).
-
----
-
-## 1. Display and input assumptions
-
-| Constraint | Implication |
-|------------|-------------|
-| **240×240, circular** | Content is clipped to a disc; corners are invisible. Put the **main action** near the **middle** of the circle so it’s easy to see and poke—not because of standards, but because that’s where the glass is nicest. |
-| **Capacitive touch (CST816D)** | Swipes and taps; hardware may report gesture codes—verify on device. |
-| **Small device, kid hands** | **Big chunky controls**—not for accessibility audits, but so nobody misses a tap while laughing. |
-| **Embedded MCU** | Don’t melt the chip: prefer **simple layouts** and **cheap** animations; save the heavy stuff for rare moments. |
+**Hardware reality:** 240×240 round LCD, embedded MCU (~20–30 fps), capacitive
+touch (CST816D), kid-sized fingers. Keep animations cheap; avoid full-screen
+redraws every frame.
 
 ---
 
-## 2. Core pattern: family strip (carousel)
+## 1. Home screen
 
-### 2.1 Concept
+### 1.1 Ring of families
 
-Families are represented by **round icons** placed on a **single horizontal row**
-that extends **beyond the left and right edges** of the visible circle. The user
-**pans the strip by swiping** horizontally. Icons that were off-screen **scroll into view**.
+All families (up to ~12) are arranged as **colored circles on the perimeter** of
+the round display, evenly spaced in a clockwise ring starting at 12 o'clock.
 
-The strip is **cyclic (wrapped)**: the family order is a **ring**. Scrolling
-continuously in one direction eventually shows the **first family again** after the
-last—there is no “end” of the list.
+| Property | Value |
+|----------|-------|
+| Ring radius | 88 px from disc center |
+| Circle diameter | 44 px |
+| Default count | 9 (8 families + ALL) |
+| Placement formula | `x = cx + R·sin(θ)`, `y = cy − R·cos(θ)`, `θ = 2π·i/n` |
 
-### 2.2 Center focus and scale
+Each circle:
+- **Filled** with a vivid neon color (unique per family, from an 8-shade palette).
+- **Neon glow shadow** matching the fill color.
+- **White abbreviation** label centered inside (`G`, `H`, `ALL`, …).
+- **Tappable** — opens that family's recording screen.
 
-- The **screen center** is the **focus point**.
-- The icon whose **center is closest** to the screen center is the **focal** (selected) family.
-- **Icon diameter scales with distance from center**: **largest at center**, smoothly **smaller** toward the sides (e.g. cosine or bell-shaped falloff—or **exaggerate** the curve for drama).
-- Neighbors stay visible but quieter—makes the **center icon** feel like the star of the show.
+The **ALL** circle: white fill, thick magenta border, dark label text.
 
-### 2.3 Interaction
+### 1.2 Center message bubble
 
-| Action | Expected behaviour |
-|--------|---------------------|
-| **Horizontal drag** | The strip **tracks the finger** in real time (continuous pan), not only after lift-off. |
-| **Ring wrap** | While dragging past a family “step”, the logical index **wraps** on the ring (infinite carousel). |
-| **Release** | **Snap** residual offset so the focal icon settles on center (small dead-zone; no extra tutorial copy on screen). |
-| **Tap focal (largest) icon** | **Zoom** the **same** focal bubble (reparent + resize overlay on home) to **almost full disc** with **icon-only** controls: **play** (opens **recording** to that family), **stop** (stub until playback exists), **back** (closes overlay). **Ignore** tap if the gesture was a drag (movement threshold). |
-| **Tap non-focal icon** | Snap that family to center (direct-select). |
+Appears in the **exact center** (120, 120) of the disc **only when messages
+exist**. Hidden when the inbox is empty.
 
-### 2.3.1 Icon-first chrome (home)
+| State | Color | Icon | Count badge |
+|-------|-------|------|-------------|
+| New messages available | Neon gold `#ffdd00` | ▶ | Yes (message count) |
+| Last message played, no new | Orange `#ff7700` | ↺ (loop) | No |
+| No messages / all deleted | — | — | hidden |
 
-The **home** screen is **icons + status only**: family strip, battery, inbox badge. **No** headline or footer **instruction text** (“who?”, “swipe to…”)—navigation must read from **motion and icons** alone. Other flows (recording timer, inbox rows) may still use **short** text where needed until fully iconified.
+The bubble **pulses** (shadow width 8→28→8 px, 550 ms, infinite) to draw
+attention.
 
-### 2.4 Broadcast (“All”)
+**Tap interactions:**
 
-**ALL** is **one icon in the same strip** with **louder** visuals—different color, wilder border, sticker energy. Same carousel rules; tap when focused = **broadcast** record flow.
+| Condition | Action |
+|-----------|--------|
+| State = *available*, first play | Plays message; count decrements; state → *played* |
+| State = *available*, has prior played | Previous played discarded; next message plays |
+| State = *played*, no new messages | Replays last message |
 
-### 2.5 Layout on a round panel
-
-- Strip **vertically centered** on the disc works well.
-- Side icons **clipped by the circle** = peek of “more over there”—good for discovery.
-- Keep **battery / back** out of the **very rim** if it’s hard to tap—practical, not moral.
-
----
-
-## 3. What actually has to behave (embedded reality)
-
-Everything else is taste. This section is **performance and clarity under silicon constraints**.
-
-### 3.1 Don’t confuse the kid mid-flow
-
-- **One obvious main thing per screen** most of the time (who to message? / recording? / listening?)—confusion isn’t “accessible,” it’s just annoying.
-- **Recording** should still feel **obviously recording** (big mood, timer, hard to leave by accident).
-
-### 3.2 Touch
-
-- **Big tap areas** and spacing so misses are rare during real play.
-- **Snappy feedback** on press (squash, flash, sound)—under ~100 ms **feel** if you can.
-
-### 3.3 Visual design (permission slip)
-
-- **Color:** use **lots** of it—gradients, accents, per-family themes, seasonal nonsense. “Too much” is on the table.
-- **Type:** short strings; fun display fonts are welcome if they stay legible **enough** at this size.
-- **Icons:** expressive, memorable, a little unhinged is OK.
-
-### 3.4 Feedback and state
-
-- **Recording / playback / new message:** make it **unmissable**—animation, color, LED, chirp, whatever fits the vibe.
-- **Battery low:** still warn before death—kids can’t charge it if the thing’s dead.
-
-### 3.5 Errors and connectivity (future)
-
-- Plain words beat error codes. Retry should feel like a **game retry**, not an IT ticket.
-
-### 3.6 Performance (LVGL / MCU)
-
-- Prefer **transforms** over giant full-screen redraws every frame.
-- **Short** bouncy animations; **20–30 fps steady** beats stuttery “60 fps” ambition.
-- Skip unlimited particles, full-screen blur, or shadow stacks that cost frames.
+**Auto-delete:** After the device is idle for **2 minutes** with state = *played*
+and no new messages, the played message is silently discarded and the bubble hides.
 
 ---
 
-## 4. Screen inventory (target)
+## 2. Family / recording screen
 
-| Screen | Purpose | Notes |
-|--------|---------|--------|
-| **Home** | Family strip (carousel) + status | Focal icon = selected family |
-| **Recording** | Record message to selected family / ALL | Timer, stop, cancel—**big personality** |
-| **Sending (offline stub)** | Brief confirmation | Can be silly (“Zap!” “Sent!”) |
-| **Inbox** | List of messages | Rows can be colorful, not spreadsheet |
-| **Playback** | Play message | Progress + back |
+Opened by tapping any ring circle. The selected family's **neon color floods the
+entire screen**. (ALL circle → vivid magenta `#dd00cc`.)
 
-Global **status bar**: battery, charging, inbox count—can be **cute** (tiny icons, badges) as long as it reads at a glance.
+### 2.1 Layout
 
----
+```
+        ┌──────────────────────────┐
+        │                          │
+        │       [big circle]       │  ← record / stop button, Ø 84 px
+        │        center -14 px     │    hot red → lava orange while recording
+        │                          │
+        │        [◀ back]          │  ← back button, Ø 38 px, center +68 px
+        └──────────────────────────┘
+```
 
-## 5. Explicitly out of scope
+### 2.2 Record button states
 
-Formal **accessibility conformance** (strict contrast ratios, reduced-motion policies, “color may not be the only cue” rules, etc.) is **not a goal** for v1. Optimize for **delight in the neighborhood**. If a tradeoff is **more fun** vs **more compliant**, **choose fun** unless it breaks basic usability (see **§3**).
+| State | Button color | Inner indicator | Action on tap |
+|-------|-------------|-----------------|---------------|
+| Idle | Hot red `#ff1144` | White dot (Ø 26 px) | Start recording |
+| Recording | Lava orange `#ff5500` | `■` (STOP symbol) | Stop + send |
 
----
+Red glow shadow (22 px spread) always present — shifts to orange while recording.
 
-## 6. Open decisions (to resolve in implementation)
+### 2.3 Sent notification
 
-- **Tap policy**: **implemented:** tap **focal** opens **family zoom** (large icon + play / stop / back); **play** continues to **recording** for that family; tap **side** snaps to center; **drag** past a movement threshold **cancels** tap.
-- **Snap animation** curve and duration—how **rubbery** vs snappy (release snap may be **instant** today).
-- **Exact scale function** (min/max diameter, falloff curve)—how **cartoony** the center pop is (current: five fixed diameters 50…98…50 px).
-- **Inbox** as full screen vs overlay from home (**full screen** behind same disc layout for now).
+When stop is pressed:
+1. Record button **hides**.
+2. **"WHOOSH!"** appears in neon mint `#22ff88` at center, font 20 px.
+3. After **5 seconds** the screen fades back to Home automatically.
+4. Tapping **back** cancels the countdown and returns immediately.
 
-### 6.1 Implementation notes (firmware)
+Recording is **auto-stopped** at 30 seconds max.
 
-- **Layout:** `ui_app.c` uses a **full 240×240** main panel (solid fill, **no** `LV_RADIUS_CIRCLE` on that layer — a circle would leave transparent square corners and read as black arcs on round glass). **Inner padding** (~10 px) keeps the ui-spec safe inset; the hardware round mask crops the framebuffer corners.
-- **Strip:** Five **round** slots (−2…+2) with **bell-ish** diameters; horizontal positions use **`s_strip_scroll_px`** for **continuous drag**; **wrap** adjusts `s_carousel_idx` when `|scroll|` crosses half a **step** (~44 px). The strip row is **vertically centered** in the disc (fixed spacer above + flex grow below) with **`STRIP_ROW_H`** ~136 px. **CST816D** gesture bytes are **not** used for carousel pan; pan uses LVGL **`PRESSED` / `PRESSING` / `RELEASED`** on the strip container with **`LV_OBJ_FLAG_EVENT_BUBBLE`** from bubbles.
-- **Home chrome (§2.3.1):** No “Who?” / hint labels—only **status** (battery, inbox) + **strip**.
-- **Family zoom:** Full-screen overlay on **`lv_display_get_layer_sys()`** (last layer before flush in `lv_refr`, above `act_scr` and `top_layer`). The **focal strip bubble is reparented** into that layer and resized; **play** → recording, **stop** stub, **back** → `zoom_close()`. While zoom is open, the **home screen** is **`LV_OBJ_FLAG_HIDDEN`** so only the overlay draws (no duplicate bubble behind). Pointer indev uses **`lv_indev_set_scroll_throw(..., 0)`** and strip drag **zeros scroll offsets** on the home hierarchy so the flex column does not slide. Home uses a **recursive scroll lock** on the whole home widget tree plus **`LV_EVENT_SCREEN_LOADED`** re-apply so horizontal drag does not scroll the flex column—only `s_strip_scroll_px` moves strip bubbles.
-- **Recording / Inbox:** **Column flex** inside the same disc—timer, copy, **Record | Stop** row, **Back**—so controls do not stack on the same coordinates.
+### 2.4 Back button
 
-### 6.2 Status and challenges (April 2026)
-
-**Where the implementation is (in code, `firmware/main/app/ui_app.c` + `hal/touch.c`):**
-
-- **Home** is a **horizontal family strip** (five fixed slots, cyclic index, continuous `s_strip_scroll_px` pan) with **status** (battery, inbox). Strip is **vertically centered** in the disc (`STRIP_ROW_H`, fixed top spacer + flex below).
-- **Touch:** CST816D → LVGL **pointer** indev; **`lv_indev_set_scroll_throw(..., 0)`** to disable momentum scroll on widgets.
-- **Scroll isolation:** Recursive **scroll lock** on the home widget tree (`SCROLL_CHAIN_*`, no scroll dirs), **`home_reset_scroll_offsets()`** on strip **PRESSED/PRESSING**, and **`LV_EVENT_SCREEN_LOADED`** re-applies the lock when returning to home.
-- **Family zoom:** Focal bubble **reparented** to a **fullscreen panel** on **`lv_display_get_layer_sys()`**; **zoom open** sets **`LV_OBJ_FLAG_HIDDEN`** on **`s_scr_home`** so the menu is not composited under the overlay; **zoom close** restores. **`app_tick`** skips status label updates while zoom is active to avoid invalidating the hidden home screen.
-- **Build stamp:** `ESP_LOGI` in `ui_app_init` with `__DATE__` / `__TIME__` so serial logs show which `ui_app.c` build ran.
-
-**Challenges (on-device behaviour not yet aligned with the spec in practice):**
-
-1. **Verification vs binary on chip** — If `idf.py monitor` prints **`Checksum mismatch between flashed and built applications`**, the chip is **not** running `firmware/build/bullerby-chat.bin` from the tree you just built. **Always** `idf.py build` then `idf.py -p PORT flash` from the same `firmware/` checkout before judging UI. See **AGENTS.md** (Development loop / checksum warning).
-2. **Strip pan vs whole-column motion** — Intended: only bubble positions change via `s_strip_scroll_px`. **Reported:** the whole home column still appears to move with the finger. Code resets LVGL scroll offsets and disables scroll throw; **if this persists on a verified flash**, next steps are in-device logging (scroll x/y on `s_home_disc` / `s_scr_home` per frame) or a temporary **fullscreen solid color** on `layer_sys` at boot (one-shot) to prove layer compositing.
-3. **Zoom / focal tap** — Intended: one large focal bubble on the **sys** layer with home hidden. **Reported:** looks like a **second** circle, **behind** the menu, and **dismisses** after ~1 second. Mitigations in code (hide home, sys layer, no tick invalidation during zoom) **may** still not match glass if the wrong binary is running, or if another subsystem (e.g. **CST816D gesture** + logging, **double-buffer** tearing, or an **LVGL** refresh path on this port) needs investigation.
-4. **Hardware vs software gestures** — `touch.c` logs **gesture** register edges; those bytes are **not** wired into carousel logic yet. If the panel reports **swipes** that LVGL maps to **scroll** or **focus** changes, that could interact with custom pan — worth correlating serial gesture logs with repro steps.
-
-**Next engineering steps (suggested):**
-
-- Confirm **no checksum mismatch** after every flash; capture **full** boot log including **`ui_app build stamp`**.
-- If issues remain with a **verified** flash: add **short-lived** on-screen **debug** (e.g. Kconfig-gated corner color or scroll values) *or* **ESP_LOGI** throttled scroll positions during drag to separate **LVGL scroll** from **custom strip** pan.
-- Optionally profile **CST816D** gesture behaviour (Phase A in **firmware-plan.md**) vs raw coordinates for carousel.
+Always visible. Returns to Home screen immediately (cancels any in-progress
+recording without sending).
 
 ---
 
-## 7. Document map
+## 3. What actually must work (hardware constraints)
+
+- **One clear main action per screen.** Home = choose family or play message.
+  Recording = record or back.
+- **Big tap targets.** Smallest interactive element = 38 px; most = 44–84 px.
+- **Snappy response.** Touch → visible change ≤ 100 ms feel-time.
+- **Cheap animations.** Shadow-width pulse and fade-on screen transitions only;
+  no particles, no full-screen blur stacks.
+- **Steady 20–30 fps.** Prefer `transform_scale` / shadow tweaks over
+  `lv_obj_invalidate` every frame.
+
+---
+
+## 4. Screen inventory
+
+| Screen | Purpose |
+|--------|---------|
+| **Home** | Ring of family circles + optional message bubble |
+| **Record** | Full-color family screen, record/stop, back, sent notification |
+
+*(Inbox / playback list removed in v2 — messages arrive and play from the home
+center bubble.)*
+
+---
+
+## 5. Colours
+
+| Token | Hex | Use |
+|-------|-----|-----|
+| `COL_BG` | `#0d0921` | Home screen background (deep space) |
+| `COL_MSG_READY` | `#ffdd00` | Message bubble — new messages |
+| `COL_MSG_PLAYED` | `#ff7700` | Message bubble — replay |
+| `COL_REC_BTN` | `#ff1144` | Record button idle |
+| `COL_STOP_BTN` | `#ff5500` | Record button active |
+| `COL_SENT_TEXT` | `#22ff88` | "WHOOSH!" notification |
+| `COL_ALL_FILL` | `#ffffff` | ALL circle fill |
+| `COL_ALL_BORDER` | `#ff00ff` | ALL circle border |
+
+Family neon palette (cycled by `(id−1) mod 8`):
+
+| Index | Hex | Name |
+|-------|-----|------|
+| 0 | `#ff1493` | Hot pink |
+| 1 | `#39ff14` | Electric lime |
+| 2 | `#ff6600` | Neon orange |
+| 3 | `#0066ff` | Electric blue |
+| 4 | `#cc00ff` | Vivid violet |
+| 5 | `#00e5ff` | Neon cyan |
+| 6 | `#ff0033` | Vivid red |
+| 7 | `#ffcc00` | Gold |
+
+---
+
+## 6. Implementation notes
+
+- **No carousel.** The v1 horizontal strip is gone. Families sit on the ring at
+  fixed angular positions; no scroll or snap logic needed.
+- **Ring math:** `θ = 2π·i/n` with `sin`/`cos` from `<math.h>` (`-lm` on
+  GCC-based toolchain; available in ESP-IDF).
+- **Scroll lock:** `no_scroll()` applied to every widget — the ring layout has no
+  scrollable content.
+- **Pulse:** `lv_anim_t` on `shadow_width` (8→28→8, 550 ms, infinite repeat with
+  playback). `lv_anim_del(bubble, bubble_glow_exec)` stops it when bubble hides.
+- **Screen transitions:** `lv_screen_load_anim(…, LV_SCR_LOAD_ANIM_FADE_ON, 180, 0, false)`.
+- **Adding families:** Increment `k_families[]` in `model_families.c`. The ring
+  recomputes positions automatically for any `n ≤ MAX_FAMILY_CIRCLES (16)`.
+- **Inbox screen removed.** `ui/ui.c` helper functions (`ui_set_status`,
+  `ui_show_recording`, `ui_show_playback`) are legacy stubs — not called by v2 UI.
+
+---
+
+## 7. Open decisions
+
+- **Tap feedback:** Currently no press animation on ring circles. A quick
+  `transform_scale` squash on `LV_EVENT_PRESSED` would add snappiness.
+- **ALL broadcast flow:** ALL opens the record screen the same as any family. A
+  separate "broadcast" visual treatment (e.g., rainbow shimmer on the record BG)
+  would be fun.
+- **Volume / haptic feedback:** Not wired yet; LED flash on send would add
+  delight.
+- **More than 12 families:** Ring math handles up to 16 (MAX_FAMILY_CIRCLES).
+  Beyond ~12 the circles start to crowd; a second concentric ring would be needed.
+
+---
+
+## 8. Document map
 
 | Doc | Role |
 |-----|------|
-| [project-plan.md](project-plan.md) | Product + server architecture (§3) |
-| [server/README.md](../server/README.md) | Deployed Worker API (HTTP/WSS); **`npm test`** + optional **`npm run test:e2e`** |
-| [firmware-plan.md](firmware-plan.md) | ESP-IDF modules and phases |
+| [project-plan.md](project-plan.md) | Product + server architecture |
+| [firmware-plan.md](firmware-plan.md) | ESP-IDF modules, phases |
 | [repo-structure.md](repo-structure.md) | Repository layout |
-| [product-description.md](product-description.md) | Hardware |
-
-Strip implementation notes: **§6.1** above and [firmware-plan.md](firmware-plan.md).
+| [product-description.md](product-description.md) | Hardware specs |
+| [server/README.md](../server/README.md) | Cloudflare Worker API |

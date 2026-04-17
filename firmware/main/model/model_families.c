@@ -3,14 +3,17 @@
 /* Stub: pretend this device is family id 1 (replace with NVS). */
 const uint8_t model_my_family_id = 1;
 
+/* 8 regular families + 1 broadcast = 9 circles on the home ring. */
 static const family_t k_families[] = {
-    {1, "Gustafsson", "G", false},
-    {2, "Hansson", "H", false},
-    {3, "Ivarsson", "I", false},
-    {4, "Jansson", "J", false},
-    {5, "Karlsson", "K", false},
-    {6, "Lindberg", "L", false},
-    {7, "All", "ALL", true},
+    {1, "Gustafsson", "G",   false},
+    {2, "Hansson",    "H",   false},
+    {3, "Ivarsson",   "I",   false},
+    {4, "Jansson",    "J",   false},
+    {5, "Karlsson",   "K",   false},
+    {6, "Lindberg",   "L",   false},
+    {8, "Magnusson",  "M",   false},
+    {9, "Nilsson",    "N",   false},
+    {7, "All",        "ALL", true },
 };
 
 size_t model_family_count(void)
