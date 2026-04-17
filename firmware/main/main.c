@@ -1,9 +1,9 @@
 /*
  * Bullerby Chat — Firmware
  *
- *  - Display + LVGL: home UI (dummy families), recording stub, carousel (finger drag)
- *  - Touch: CST816D; LVGL pointer events for strip pan (hardware gestures optional)
- *  - Audio: BOOT button hold → record; release → playback (PCM loopback)
+ *  - Display + LVGL: home UI (ring of family circles + center message bubble)
+ *  - Touch: CST816D via LVGL pointer indev
+ *  - Audio: BOOT button hold → record; release → playback (PCM loopback stub)
  *  - WiFi: optional (sdkconfig / menuconfig: CONFIG_BULLERBY_ENABLE_WIFI)
  */
 
@@ -189,5 +189,5 @@ void app_main(void)
 
     xTaskCreate(audio_task, "audio", 4096, NULL, 5, NULL);
 
-    ESP_LOGI(TAG, "Ready. Drag strip; tap list for inbox; tap center bubble → record (BOOT = audio test).");
+    ESP_LOGI(TAG, "Ready. Tap a family circle → record; tap center bubble → play messages (BOOT = audio test).");
 }

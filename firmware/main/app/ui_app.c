@@ -137,8 +137,9 @@ static void style_base_screen(lv_obj_t *scr)
 static void ring_pos(int idx, int n, lv_coord_t *px, lv_coord_t *py)
 {
     float theta = 2.0f * (float)M_PI * idx / (float)n;
-    int cx = DISC_CX + (int)(RING_RADIUS * sinf(theta) + 0.5f);
-    int cy = DISC_CY - (int)(RING_RADIUS * cosf(theta) + 0.5f);
+    /* lroundf: rounds half-away-from-zero, correct on the left/top (negative) half. */
+    int cx = DISC_CX + (int)lroundf(RING_RADIUS * sinf(theta));
+    int cy = DISC_CY - (int)lroundf(RING_RADIUS * cosf(theta));
     *px = (lv_coord_t)(cx - RING_CIRCLE_DIA / 2);
     *py = (lv_coord_t)(cy - RING_CIRCLE_DIA / 2);
 }
