@@ -1,0 +1,17 @@
+{
+  "idf.showOnboardingOnInit": false,
+  "idf.enableIdfComponentManager": true,
+  "idf.port": "detect",
+  "idf.flashType": "JTAG",
+  "idf.flashBaudRate": "460800",
+  "idf.buildPath": "${workspaceFolder}/firmware/build",
+  "idf.sdkconfigFilePath": "${workspaceFolder}/firmware/sdkconfig",
+  "idf.sdkconfigDefaults": ["firmware/sdkconfig.defaults"],
+  "idf.openOcdConfigs": ["board/esp32s3-builtin.cfg"],
+  "idf.gitPath": "/usr/bin/git",
+  "idf.customExtraVars": {
+    "IDF_PATH": "${env:HOME}/esp/esp-idf",
+    "IDF_TOOLS_PATH": "${env:HOME}/.espressif",
+    "PATH": "/opt/homebrew/bin:${env:PATH}"
+  }
+}

@@ -1,0 +1,29 @@
+# --- Firmware (ESP-IDF) ---
+# Build tree and Component Manager download dir (versions pinned in main/idf_component.yml + dependencies.lock).
+firmware/build/
+firmware/managed_components/
+firmware/.cache/
+
+# Local Kconfig backup after menuconfig
+firmware/sdkconfig.old
+
+# --- Server (see also server/.gitignore) ---
+node_modules/
+.wrangler/
+.dev.vars
+*.local.*
+
+# --- OS / editors ---
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Python (tooling / IDF helper scripts)
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+venv/
+.venv/
