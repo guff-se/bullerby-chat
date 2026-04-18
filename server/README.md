@@ -93,13 +93,18 @@ This is a **Node** client check, not firmware; it validates the live Cloudflare 
 
 **Multipart** (`POST /api/messages`):
 
-- `audio` — file field (Opus blob, max ~128 KiB).
-- `metadata` — JSON string, e.g. `{ "to_family_id": "family-b", "duration_s": 5 }` or omit / `"ALL"` / `"broadcast"` for broadcast.
+- `audio` — file field (audio blob, max **128 KiB**). Codec is up to the sender — today firmware uploads **raw 16-bit mono PCM**; swapping in Opus later is transparent to the server.
+- `metadata` — JSON string:
+  - `to_family_id` *(optional)* — omit or `"ALL"` / `"broadcast"` for broadcast.
+  - `duration_s` *(optional)* — float; echoed in `new_message`.
+  - `sample_rate_hz` *(optional)* — integer; defaults to **16000** when missing. Echoed in `new_message` so the receiver can retune its I2S TX clock. Firmware today uploads **24000**.
+
+  Example: `{ "to_family_id": "family-b", "duration_s": 2.5, "sample_rate_hz": 24000 }`.
 
 **WebSocket** (after `connected`):
 
 - Send `{ "type": "heartbeat" }` → `{ "type": "heartbeat_ack", ... }`.
-- Receive `{ "type": "new_message", "message_id", "from_family_id", "duration_s", "download_url" }` — `GET` the URL once (signed, expires with relay TTL).
+- Receive `{ "type": "new_message", "message_id", "from_family_id", "duration_s", "sample_rate_hz", "download_url" }` — `GET` the URL once (signed, expires with relay TTL).
 
 ## Commands
 

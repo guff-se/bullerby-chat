@@ -29,4 +29,9 @@ idf_component_register(
         esp_adc
         spi_flash
         app_update
+        esp-tls
+        esp_http_client
+        esp_websocket_client
+        mbedtls
+        json
 )

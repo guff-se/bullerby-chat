@@ -5,11 +5,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/** One family or the broadcast row (dummy data until server exists). */
+/** One family or the broadcast row. */
 typedef struct {
     uint8_t id;
-    const char *name; /**< Display name (home ring uses raster emoji assets, see family_emoji_assets.h) */
-    bool is_broadcast;  /**< ALLA — sänd till alla */
+    /** Display name (home ring uses raster emoji assets, see family_emoji_assets.h) */
+    const char *name;
+    /** ALLA — sänd till alla */
+    bool is_broadcast;
+    /** Stable id used by the server API (`family-a`, `family-b`, ...); NULL for broadcast. */
+    const char *server_id;
 } family_t;
 
 /** Which family this device belongs to; set by model_init() from NVS (flash). */
@@ -24,3 +28,5 @@ esp_err_t model_set_my_family_id(uint8_t id);
 size_t model_family_count(void);
 const family_t *model_family_by_index(size_t index);
 const family_t *model_family_by_id(uint8_t id);
+/** Look up a family by its server id (e.g. `family-a`). NULL if unknown. */
+const family_t *model_family_by_server_id(const char *server_id);

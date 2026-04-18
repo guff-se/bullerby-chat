@@ -3,12 +3,13 @@
  *
  *  - Display + LVGL: home UI (ring of family circles + center message bubble)
  *  - Touch: CST816D via LVGL pointer indev
- *  - Audio: BOOT button hold → record; release → playback (PCM loopback stub)
- *  - WiFi: optional (sdkconfig / menuconfig: CONFIG_BULLERBY_ENABLE_WIFI)
+ *  - Audio: BOOT button hold → record → local loopback + (optional) upload
+ *  - Network (CONFIG_BULLERBY_ENABLE_NET): WiFi → register → WS → relay playback
  */
 
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
 #include "driver/i2s_std.h"
@@ -18,11 +19,6 @@
 #include "nvs_flash.h"
 #include "sdkconfig.h"
 
-#if CONFIG_BULLERBY_ENABLE_WIFI
-#include "esp_netif.h"
-#include "esp_wifi.h"
-#endif
-
 #include "lvgl.h"
 #include "esp_lvgl_port.h"
 
@@ -30,69 +26,109 @@
 #include "app/ui_app.h"
 #include "model/model_families.h"
 
+#if CONFIG_BULLERBY_ENABLE_NET
+#include "net/identity.h"
+#include "net/net.h"
+#endif
+
 static const char *TAG = "main";
 
 extern i2s_chan_handle_t hal_codec_get_tx(void);
 extern i2s_chan_handle_t hal_codec_get_rx(void);
 
-#if CONFIG_BULLERBY_ENABLE_WIFI
+/* ── Audio shared state ─────────────────────────────────────────────── */
 
-#define WIFI_SSID     "YOUR_SSID"
-#define WIFI_PASS     "YOUR_PASS"
+#define AUDIO_BUF_SAMPLES  (AUDIO_SAMPLE_RATE * 10)
+#define AUDIO_BUF_BYTES    (AUDIO_BUF_SAMPLES * sizeof(int16_t))
+/** Server cap is 128 KiB. At 24 kHz mono 16-bit that's ~2.7 s of audio. */
+#define UPLOAD_CAP_BYTES   (128 * 1024)
 
-static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
+/** Stereo capture buffer (interleaved L/R 16-bit). */
+static int16_t *s_cap_buf = NULL;
+/** Mono upload / playback buffer (left channel only). */
+static int16_t *s_mono_buf = NULL;
+
+static SemaphoreHandle_t s_audio_lock;
+
+static void audio_lock(void)
 {
-    (void)arg;
-    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
-    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
-        ESP_LOGW(TAG, "WiFi disconnected, reconnecting...");
-        esp_wifi_connect();
-    } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
-        ip_event_got_ip_t *event = (ip_event_got_ip_t *)data;
-        ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
+    if (s_audio_lock) xSemaphoreTake(s_audio_lock, portMAX_DELAY);
+}
+static void audio_unlock(void)
+{
+    if (s_audio_lock) xSemaphoreGive(s_audio_lock);
+}
+
+/** Copy left channel from interleaved stereo PCM into `dst`. Returns mono byte count. */
+static size_t deinterleave_left(const int16_t *stereo, size_t stereo_bytes, int16_t *dst)
+{
+    size_t frames = stereo_bytes / 4;
+    for (size_t i = 0; i < frames; i++) {
+        dst[i] = stereo[i * 2];
+    }
+    return frames * sizeof(int16_t);
+}
+
+/** Play mono 16-bit PCM through the speaker at `sample_rate` Hz (stereo-expanded). */
+static void play_mono_pcm(const int16_t *mono, size_t mono_bytes, int sample_rate)
+{
+    if (mono_bytes == 0) return;
+
+    i2s_chan_handle_t tx = hal_codec_get_tx();
+    if (!tx) return;
+
+    i2s_channel_disable(tx);
+
+    /* Retune TX clock if needed, then restore to mic rate on the way out. */
+    bool retuned = (sample_rate > 0 && sample_rate != AUDIO_SAMPLE_RATE);
+    if (retuned) {
+        i2s_std_clk_config_t clk = I2S_STD_CLK_DEFAULT_CONFIG(sample_rate);
+        clk.mclk_multiple = I2S_MCLK_MULTIPLE_256;
+        if (i2s_channel_reconfig_std_clock(tx, &clk) != ESP_OK) {
+            ESP_LOGW(TAG, "could not retune I2S TX to %d Hz — playing at %d",
+                     sample_rate, AUDIO_SAMPLE_RATE);
+            retuned = false;
+        }
+    }
+
+    hal_pa_enable(true);
+    i2s_channel_enable(tx);
+
+    int16_t stereo_chunk[480 * 2];
+    size_t frames = mono_bytes / sizeof(int16_t);
+    size_t done = 0;
+    while (done < frames) {
+        size_t chunk = (frames - done > 480) ? 480 : (frames - done);
+        for (size_t i = 0; i < chunk; i++) {
+            stereo_chunk[i * 2]     = mono[done + i];
+            stereo_chunk[i * 2 + 1] = mono[done + i];
+        }
+        size_t written = 0;
+        i2s_channel_write(tx, stereo_chunk, chunk * 2 * sizeof(int16_t),
+                          &written, portMAX_DELAY);
+        done += chunk;
+    }
+
+    i2s_channel_disable(tx);
+    hal_pa_enable(false);
+
+    if (retuned) {
+        i2s_std_clk_config_t clk = I2S_STD_CLK_DEFAULT_CONFIG(AUDIO_SAMPLE_RATE);
+        clk.mclk_multiple = I2S_MCLK_MULTIPLE_256;
+        i2s_channel_reconfig_std_clock(tx, &clk);
     }
 }
 
-static void wifi_init(void)
-{
-    ESP_LOGI(TAG, "Initialising WiFi (SSID: %s)", WIFI_SSID);
-
-    ESP_ERROR_CHECK(esp_netif_init());
-    esp_netif_create_default_wifi_sta();
-
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-
-    esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL);
-    esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL);
-
-    wifi_config_t wifi_cfg = {
-        .sta = {
-            .ssid     = WIFI_SSID,
-            .password = WIFI_PASS,
-        },
-    };
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg));
-    ESP_ERROR_CHECK(esp_wifi_start());
-}
-
-#endif /* CONFIG_BULLERBY_ENABLE_WIFI */
-
-#define AUDIO_BUF_SAMPLES  (24000 * 10)
-#define AUDIO_BUF_BYTES    (AUDIO_BUF_SAMPLES * sizeof(int16_t))
-
-static int16_t *audio_buf = NULL;
-static size_t   audio_len = 0;
+/* ── BOOT-button capture loop ───────────────────────────────────────── */
 
 static void audio_task(void *arg)
 {
     (void)arg;
 
-    audio_buf = heap_caps_malloc(AUDIO_BUF_BYTES, MALLOC_CAP_SPIRAM);
-    if (audio_buf == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate audio buffer in PSRAM");
+    s_cap_buf = heap_caps_malloc(AUDIO_BUF_BYTES, MALLOC_CAP_SPIRAM);
+    s_mono_buf = heap_caps_malloc(AUDIO_BUF_BYTES / 2, MALLOC_CAP_SPIRAM);
+    if (!s_cap_buf || !s_mono_buf) {
+        ESP_LOGE(TAG, "failed to allocate audio buffers in PSRAM");
         vTaskDelete(NULL);
         return;
     }
@@ -104,54 +140,77 @@ static void audio_task(void *arg)
     };
     gpio_config(&btn_cfg);
 
-    i2s_chan_handle_t tx = hal_codec_get_tx();
     i2s_chan_handle_t rx = hal_codec_get_rx();
 
-    while (1) {
-        if (gpio_get_level(PIN_BOOT_BTN) == 0) {
-            ESP_LOGI(TAG, "Recording...");
-            hal_led_set(true);
-
-            i2s_channel_enable(rx);
-            audio_len = 0;
-            size_t bytes_read = 0;
-
-            while (gpio_get_level(PIN_BOOT_BTN) == 0 && audio_len < AUDIO_BUF_BYTES) {
-                i2s_channel_read(rx, audio_buf + (audio_len / sizeof(int16_t)),
-                                 1024, &bytes_read, portMAX_DELAY);
-                audio_len += bytes_read;
-            }
-
-            i2s_channel_disable(rx);
-            hal_led_set(false);
-            ESP_LOGI(TAG, "Recorded %u bytes (%.1f s)", (unsigned)audio_len,
-                     (float)audio_len / (AUDIO_SAMPLE_RATE * 2));
-
-            if (audio_len > 0) {
-                ESP_LOGI(TAG, "Playing back...");
-                hal_pa_enable(true);
-                i2s_channel_enable(tx);
-
-                size_t bytes_written = 0;
-                size_t offset = 0;
-                while (offset < audio_len) {
-                    size_t chunk = (audio_len - offset > 1024) ? 1024 : (audio_len - offset);
-                    i2s_channel_write(tx, (uint8_t *)audio_buf + offset,
-                                      chunk, &bytes_written, portMAX_DELAY);
-                    offset += bytes_written;
-                }
-
-                i2s_channel_disable(tx);
-                hal_pa_enable(false);
-                ESP_LOGI(TAG, "Playback done");
-            }
-
-            vTaskDelay(pdMS_TO_TICKS(300));
+    for (;;) {
+        if (gpio_get_level(PIN_BOOT_BTN) != 0) {
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
         }
 
-        vTaskDelay(pdMS_TO_TICKS(50));
+        audio_lock();
+        ESP_LOGI(TAG, "recording…");
+        hal_led_set(true);
+
+        i2s_channel_enable(rx);
+        size_t cap_bytes = 0;
+        while (gpio_get_level(PIN_BOOT_BTN) == 0 && cap_bytes < AUDIO_BUF_BYTES) {
+            size_t got = 0;
+            i2s_channel_read(rx, (uint8_t *)s_cap_buf + cap_bytes,
+                             1024, &got, portMAX_DELAY);
+            cap_bytes += got;
+        }
+        i2s_channel_disable(rx);
+        hal_led_set(false);
+
+        size_t mono_bytes = deinterleave_left(s_cap_buf, cap_bytes, s_mono_buf);
+        ESP_LOGI(TAG, "captured %u mono bytes (%.1f s @ %d Hz)",
+                 (unsigned)mono_bytes,
+                 (float)mono_bytes / (AUDIO_SAMPLE_RATE * 2),
+                 AUDIO_SAMPLE_RATE);
+
+        if (mono_bytes > 0) {
+            play_mono_pcm(s_mono_buf, mono_bytes, AUDIO_SAMPLE_RATE);
+        }
+
+#if CONFIG_BULLERBY_ENABLE_NET
+        /* Upload — clip to server cap, send as broadcast. */
+        if (mono_bytes > 0 && net_is_online()) {
+            size_t up_bytes = mono_bytes > UPLOAD_CAP_BYTES ? UPLOAD_CAP_BYTES : mono_bytes;
+            if (up_bytes < mono_bytes) {
+                ESP_LOGW(TAG, "clipping upload to %u bytes (server 128 KiB cap)",
+                         (unsigned)up_bytes);
+            }
+            float duration = (float)up_bytes / (AUDIO_SAMPLE_RATE * 2);
+            esp_err_t uerr = net_send_pcm(NULL /* broadcast */,
+                                          (const uint8_t *)s_mono_buf, up_bytes,
+                                          AUDIO_SAMPLE_RATE, duration);
+            if (uerr != ESP_OK) {
+                ESP_LOGW(TAG, "upload failed: %s", esp_err_to_name(uerr));
+            }
+        }
+#endif
+        audio_unlock();
+
+        vTaskDelay(pdMS_TO_TICKS(300));
     }
 }
+
+#if CONFIG_BULLERBY_ENABLE_NET
+
+/* Called on the net worker thread after a download completes. */
+static void on_remote_audio(const uint8_t *pcm, size_t pcm_len,
+                            int sample_rate_hz, const char *from_family_id)
+{
+    ESP_LOGI(TAG, "incoming audio from %s: %u bytes @ %d Hz",
+             from_family_id ? from_family_id : "?",
+             (unsigned)pcm_len, sample_rate_hz);
+    audio_lock();
+    play_mono_pcm((const int16_t *)pcm, pcm_len, sample_rate_hz);
+    audio_unlock();
+}
+
+#endif /* CONFIG_BULLERBY_ENABLE_NET */
 
 void app_main(void)
 {
@@ -169,7 +228,6 @@ void app_main(void)
     }
 
     ESP_ERROR_CHECK(model_init());
-
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     hal_led_init();
@@ -184,13 +242,20 @@ void app_main(void)
 
     hal_led_set(false);
 
-#if CONFIG_BULLERBY_ENABLE_WIFI
-    wifi_init();
+    s_audio_lock = xSemaphoreCreateMutex();
+
+#if CONFIG_BULLERBY_ENABLE_NET
+    ESP_ERROR_CHECK(identity_init());
+    net_set_playback_cb(on_remote_audio);
+    esp_err_t nerr = net_start();
+    if (nerr != ESP_OK) {
+        ESP_LOGE(TAG, "net_start failed: %s — staying offline", esp_err_to_name(nerr));
+    }
 #else
-    ESP_LOGI(TAG, "WiFi disabled (CONFIG_BULLERBY_ENABLE_WIFI=n)");
+    ESP_LOGI(TAG, "Networking disabled (CONFIG_BULLERBY_ENABLE_NET=n)");
 #endif
 
     xTaskCreate(audio_task, "audio", 4096, NULL, 5, NULL);
 
-    ESP_LOGI(TAG, "Ready. Tap a family circle → record; tap center bubble → play messages (BOOT = audio test).");
+    ESP_LOGI(TAG, "Ready. Tap a family circle → record; BOOT hold → capture + upload + loopback.");
 }

@@ -596,8 +596,8 @@ CONFIG_PARTITION_TABLE_MD5=y
 #
 # Bullerby Chat
 #
-# CONFIG_BULLERBY_ENABLE_WIFI is not set
 CONFIG_BULLERBY_DEFAULT_FAMILY_ID=8
+# CONFIG_BULLERBY_ENABLE_NET is not set
 # end of Bullerby Chat
 
 #
@@ -2304,6 +2304,13 @@ CONFIG_CU_DIAGNOSTICS_COLOR_ALWAYS=y
 # CONFIG_CU_GCC_LTO_ENABLE is not set
 # CONFIG_CU_GCC_STRING_1BYTE_ALIGN is not set
 # end of CMake Utilities
+
+#
+# ESP WebSocket client
+#
+# CONFIG_ESP_WS_CLIENT_ENABLE_DYNAMIC_BUFFER is not set
+# CONFIG_ESP_WS_CLIENT_SEPARATE_TX_LOCK is not set
+# end of ESP WebSocket client
 
 #
 # LVGL configuration

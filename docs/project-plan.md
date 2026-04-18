@@ -97,7 +97,7 @@ recorded clips during development).
 - **Protocol:** WebSocket to **`GET /api/ws`** (same `Authorization` + `X-Device-Id` as HTTP)
   - JSON `{ "type": "heartbeat" }` / `{ "type": "heartbeat_ack" }` (firmware may still use ~30s cadence for UX)
   - Auto-reconnect with exponential backoff
-- **Message upload:** `POST /api/messages` — `multipart/form-data`: field **`audio`** (file), **`metadata`** (JSON string: `to_family_id`, `duration_s`; omit or `"ALL"`/`broadcast` for broadcast)
+- **Message upload:** `POST /api/messages` — `multipart/form-data`: field **`audio`** (file), **`metadata`** (JSON string: `to_family_id`, `duration_s`, **`sample_rate_hz`** — defaults to `16000` if omitted; omit or `"ALL"`/`broadcast` for broadcast)
 - **Message download:** `GET` the **`download_url`** from the `new_message` WebSocket event — signed query **`exp`** + **`sig`**, **not** a server inbox to poll
 - **Config sync:** On boot, **`GET /api/devices/{id}/config`** (authenticated); same JSON shape as bundled `bullerby.json` families + device assignment
 
@@ -156,7 +156,7 @@ There is **no** “list unread messages on server” or “mark read on server�
 - **One persistent connection per device** (12 devices ≈ trivial).
 - Server → device:
   - `connected` — after upgrade
-  - `new_message` — `{ message_id, from_family_id, duration_s, download_url }` — fetch audio before relay TTL
+  - `new_message` — `{ message_id, from_family_id, duration_s, sample_rate_hz, download_url }` — fetch audio before relay TTL; `sample_rate_hz` lets the receiver retune I2S TX
   - **`config_updated`** — *not implemented yet*; devices pick up new config via **`GET .../config`** on reconnect or periodic poll
 - Device → server:
   - `{ "type": "heartbeat" }` → `heartbeat_ack`
@@ -279,14 +279,21 @@ No HTTP, WebSocket, or provisioning in this phase.
 
 ### Phase 4: Firmware + server integration
 
-- [ ] Replace dummy family list with config from server (or cache + sync)
-- [ ] Opus encode; upload message via HTTP; WebSocket for push
-- [ ] Download and play received messages; real inbox counts
-- [ ] Captive portal WiFi provisioning + server URL in NVS
-- [ ] OTA firmware updates via server
-- [ ] LED feedback (recording, new message, connected/disconnected)
-- [ ] Low battery warning on screen
-- [ ] Edge cases: WiFi dropout, server unreachable, full storage
+**Transport landed Apr 2026** (behind `CONFIG_BULLERBY_ENABLE_NET=y`): WiFi STA, `api_register` + `api_fetch_config`, `wss://…/api/ws` with 30 s heartbeat, multipart upload, signed GET, I2S playback at sender's `sample_rate_hz`. See [firmware-plan.md §Phase G](firmware-plan.md).
+
+- [x] **Server schema aligned** — firmware family table (`ANSUND`…`TADAA`) + `server/config/bullerby.json` now carry matching `server_id`s (`family-a`…`family-h`) and 8 devices (`device-uuid-001`…`008`).
+- [x] **`sample_rate_hz` round-trip** — device uploads mono 24 kHz PCM with the field in `metadata`; server stores + forwards it on `new_message`; receiving device reclocks I2S TX so the played-back audio sounds correct regardless of sender rate.
+- [x] **HTTP + WebSocket client** (`firmware/main/net/`) — HTTPS via `esp_http_client` + mbedTLS cert bundle, WSS via `esp_websocket_client`.
+- [x] **BOOT-hold capture uploads** to the server (broadcast), clipped to the 128 KiB server cap.
+- [x] **Remote audio playback** on the device (worker task + 128 KiB PSRAM download buffer).
+- [ ] Replace dummy family list with **server-fetched** `families[]` (today we log `GET .../config` and keep the static table).
+- [ ] **Route record-screen sends** from UI to `net_send_pcm(family->server_id, …)` instead of broadcast-only (wire up via `model_family_by_server_id`).
+- [ ] Opus encode (today: **raw PCM** at 24 kHz mono — fits the 128 KiB cap for ≤ ~2.7 s clips).
+- [ ] Captive portal WiFi provisioning + server URL in NVS (today: `Kconfig` / NVS pre-seeded).
+- [ ] OTA firmware updates via server.
+- [ ] LED feedback (recording, new message, connected/disconnected) — only `hal_led_set(true)` during capture today.
+- [x] Low battery warning on screen.
+- [ ] Edge cases: WiFi dropout retry UX, server unreachable toast, full storage.
 
 ### Phase 5: Scale to 12 Devices
 

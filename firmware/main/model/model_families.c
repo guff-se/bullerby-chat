@@ -1,5 +1,7 @@
 #include "model_families.h"
 
+#include <string.h>
+
 #include "esp_log.h"
 #include "nvs.h"
 #include "sdkconfig.h"
@@ -81,16 +83,21 @@ esp_err_t model_set_my_family_id(uint8_t id)
     return err;
 }
 
+/*
+ * Local uint8_t ids are the UI / emoji-asset index; `server_id` is the stable
+ * string used over the wire (see server/config/bullerby.json). Must stay in
+ * sync with that file until we start reading config from the server at boot.
+ */
 static const family_t k_families[] = {
-    {1, "ANSUND",     false},
-    {2, "BERGMAN",    false},
-    {3, "AMANDA",     false},
-    {4, "MATTIS",     false},
-    {5, "ANNIKA",     false},
-    {6, "NAVID",      false},
-    {7, "LINDMARKER", false},
-    {8, "TADAA",      false},
-    {9, "ALLA",       true },
+    {1, "ANSUND",     false, "family-a"},
+    {2, "BERGMAN",    false, "family-b"},
+    {3, "AMANDA",     false, "family-c"},
+    {4, "MATTIS",     false, "family-d"},
+    {5, "ANNIKA",     false, "family-e"},
+    {6, "NAVID",      false, "family-f"},
+    {7, "LINDMARKER", false, "family-g"},
+    {8, "TADAA",      false, "family-h"},
+    {9, "ALLA",       true,  NULL},
 };
 
 size_t model_family_count(void)
@@ -111,6 +118,20 @@ const family_t *model_family_by_id(uint8_t id)
     for (size_t i = 0; i < model_family_count(); i++) {
         if (k_families[i].id == id) {
             return &k_families[i];
+        }
+    }
+    return NULL;
+}
+
+const family_t *model_family_by_server_id(const char *server_id)
+{
+    if (server_id == NULL) {
+        return NULL;
+    }
+    for (size_t i = 0; i < model_family_count(); i++) {
+        const family_t *f = &k_families[i];
+        if (f->server_id != NULL && strcmp(f->server_id, server_id) == 0) {
+            return f;
         }
     }
     return NULL;

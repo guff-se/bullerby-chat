@@ -14,6 +14,7 @@ interface PendingMessage {
   from_family_id: string;
   pending_device_ids: string[];
   duration_s: number;
+  sample_rate_hz: number;
   expires_at: number;
   public_origin: string;
   /** 1 = first delivery (post); 2 and 3 = alarm retries. */
@@ -131,6 +132,7 @@ export class RelayRoom extends DurableObject {
       from_family_id: body.from_family_id,
       pending_device_ids,
       duration_s: body.duration_s,
+      sample_rate_hz: body.sample_rate_hz > 0 ? body.sample_rate_hz : 16000,
       expires_at,
       public_origin: body.public_origin.replace(/\/$/, ""),
       delivery_wave: 1,
@@ -191,6 +193,7 @@ export class RelayRoom extends DurableObject {
             message_id: msg.id,
             from_family_id: msg.from_family_id,
             duration_s: msg.duration_s,
+            sample_rate_hz: msg.sample_rate_hz,
             download_url: downloadUrl,
           })
         );

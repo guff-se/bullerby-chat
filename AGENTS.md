@@ -82,10 +82,10 @@ This document guides AI agents (e.g. Cursor) in developing and maintaining **Bul
 |-------|----------------|
 | **HAL** (`firmware/main/hal/`) | Display, touch, codec, LED, battery — contracts and pin config in `hal.h` / `product-description.md` |
 | **App / UI** (`firmware/main/app/`, LVGL in `main.c` / `ui_app.c`) | Screen flow, LVGL task safety, no long I2C work on LVGL thread |
-| **Model** (`firmware/main/model/`) | Dummy families/messages; future NVS/SPIFFS/API seams |
+| **Model** (`firmware/main/model/`) | Dummy families/messages; **`family_t.server_id`** is the bridge to server-side ids (`family-a`…) — keep aligned with `server/config/bullerby.json` |
 | **Partitions / storage** (`firmware/partitions.csv`, SPIFFS) | Clip storage and OTA layout per `firmware-plan.md` |
 | **Server** (`server/`) | Cloudflare Worker + DO; change relay/API → update code + `docs/project-plan.md` §3 + `server/README.md` |
-| **Future: firmware net** | WiFi HTTP/WS client on device — Phase 4 in `docs/project-plan.md` |
+| **Firmware net** (`firmware/main/net/`) | `identity`, `wifi`, `api_client` (HTTPS), `ws_client` (WSS), `net` (orchestrator). Gated by `CONFIG_BULLERBY_ENABLE_NET` — off in `sdkconfig.defaults`; enable locally only |
 | **Docs** | `docs/*.md` stay aligned with code |
 
 **Cross-cutting changes**
@@ -193,10 +193,13 @@ No shared CI workflow is checked in yet. If you add one, document it here and ke
 2. Build and flash; verify display, touch, audio, and battery as affected.
 3. **Coherence:** Update `product-description.md` or `firmware-plan.md` if the board or wiring story changes.
 
-### Preparing for future server / sync
+### Touching firmware networking (`firmware/main/net/`)
 
-1. **Do not** redesign the UI core; follow seams in `docs/project-plan.md` (model → API).
-2. **Coherence:** When `server/` or `deploy/` land, add them to this file and cross-link from `repo-structure.md`.
+1. Build with `CONFIG_BULLERBY_ENABLE_NET=y` in your **local** `sdkconfig` to exercise the code paths; defaults keep it off for offline dev.
+2. **HTTPS / WSS:** rely on the mbedTLS cert bundle (`esp_crt_bundle_attach`) — do not pin a custom CA unless `server_url` points at something other than `*.workers.dev`.
+3. **Long-running work must not run on the WS event thread.** Downloads go through the `net_worker` queue; playback runs behind `s_audio_lock` in `main.c`.
+4. **Sample-rate consistency:** firmware captures at `AUDIO_SAMPLE_RATE` (24 kHz) and forwards that in the `sample_rate_hz` metadata; the server defaults to 16000 when missing, so always send it explicitly from firmware.
+5. **Coherence:** if you change the wire contract (metadata, WS frames, endpoints) update **both** `server/` and `firmware/main/net/`, plus `server/README.md` + `docs/project-plan.md` §3.
 
 ---
 
@@ -213,7 +216,7 @@ No shared CI workflow is checked in yet. If you add one, document it here and ke
 - **ESP-IDF:** Install and export the environment per Espressif docs; `IDF_PATH` must point at the toolchain used to build.
 - **Project:** `cd firmware` then `idf.py build`. Use `sdkconfig.defaults` as the baseline; local `sdkconfig` is developer-specific.
 - **Hardware:** ESP32-S3 dev board with GC9A01 round LCD, ES8311, CST816D — see `docs/product-description.md`.
-- **Secrets:** Do not commit WiFi passwords, API keys, or certificates. Use local `sdkconfig` or untracked secrets files only as agreed with the maintainer.
+- **Secrets:** Do not commit WiFi passwords, API keys, or certificates. For firmware networking, set `CONFIG_BULLERBY_WIFI_SSID` / `CONFIG_BULLERBY_WIFI_PASS` / `CONFIG_BULLERBY_DEVICE_SECRET` in the **local, untracked** `firmware/sdkconfig` (via `idf.py menuconfig` → Bullerby Chat), **not** in `sdkconfig.defaults`. Device id / server URL may also be seeded via NVS namespace **`bullerby`** at runtime and will override Kconfig.
 - **Cloudflare (Workers):** The backend lives under `server/` (Wrangler). **`npm run deploy`** runs **`npm test` first**; after meaningful Worker changes, run tests then deploy. Where the maintainer has run `wrangler login`, agents may run `cd server && npm run deploy` so production stays in sync. If deploy fails (no auth, wrong account), use `wrangler login` or `CLOUDFLARE_API_TOKEN` per [Wrangler docs](https://developers.cloudflare.com/workers/wrangler/commands/#login). Do not commit API tokens.
 
 ---
