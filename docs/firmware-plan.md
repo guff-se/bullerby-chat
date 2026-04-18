@@ -3,7 +3,7 @@
 This document is the **detailed roadmap for ESP-IDF firmware** only. High-level product
 and server planning live in [project-plan.md](project-plan.md).
 
-**On-device UI design** (family strip, center scale, touch targets, embedded UX):
+**On-device UI design** (v2 **ring** layout, touch targets, embedded UX):
 [ui-spec.md](ui-spec.md).
 
 **Strategy:** Build the full on-device UX first using **dummy family data** and **no
@@ -42,6 +42,8 @@ rewriting the UI core.
 
 ## 3. Current state (baseline)
 
+**UI language:** All **user-visible** strings on the device are **Swedish** (see [ui-spec.md](ui-spec.md), Language). Code identifiers and API tokens may stay English.
+
 Already in place:
 
 - GC9A01 + LVGL 9 + esp_lvgl_port (partial buffers, RGB565 byte swap, rotation)
@@ -49,10 +51,10 @@ Already in place:
 - ES8311 + I2S at 24 kHz; **boot-button** hold → record to PSRAM → release → playback (PCM loopback)
 - Battery % + charging flag on screen; **low-battery** tint below `BATTERY_PCT_LOW_WARN` (15%); status LED
 - WiFi STA optional via **`CONFIG_BULLERBY_ENABLE_WIFI`** (off by default in `sdkconfig.defaults`); skeleton SSID/password when on
-- **Model:** `family_t` + dummy families + `ALL`; **`message_t`** + in-memory **inbox** (`model_messages.c`); `model_my_family_id` stub
-- **UI (`ui_app.c`):** **Home** = **horizontal family strip** (five scaled bubbles, continuous pan via `s_strip_scroll_px`, cyclic wrap) + **status** (battery, inbox); **Inbox** list; **Recording** with **Record/Stop** and **30 s max** UI timer (**real** capture still via **BOOT** until wired). **Family zoom** overlay (focal bubble reparented to **`lv_display_get_layer_sys()`**, home screen hidden while open) — **on-glass behaviour still being validated** (see **ui-spec.md §6.2**).
+- **Model:** `family_t` + dummy families + **ALLA** (broadcast, `is_broadcast`); **`message_t`** + in-memory **inbox** (`model_messages.c`); **`model_my_family_id`** loaded from **NVS** (`model_init()`), survives OTA; optional **`model_set_my_family_id()`** for provisioning
+- **UI (`ui_app.c`):** **Home** = **ring of family circles** (even angular spacing, emoji inside each) + **status** (battery); **center message bubble** when the dummy inbox has items (tap → model mark-read / state); **Recording** = full-bleed family colour, title bar, **Record/Stop**, back, **random Swedish send toast**, **30 s max** UI timer (**real** I2S capture still via **BOOT** until Phase D wires codec to the button). No horizontal strip / zoom overlay in current tree — superseded by v2 (see **ui-spec.md** implementation notes).
 
-**Gaps for product UX:** Audio pipeline wired to recording UI; Opus + SPIFFS; **animated snap** / rubber band after swipe; **on-device confirmation** that strip-only pan and zoom match **ui-spec** (scroll/LVGL interaction and verification — **§6.2**); sending screen; playback screen.
+**Gaps for product UX:** Record/stop drives **I2S** from the UI; Opus + SPIFFS; **dedicated inbox list** + decode→speaker playback; optional **LED / sound** on send; optional CST816D **gesture** pager; richer **screen transitions** beyond fade.
 
 ---
 
@@ -93,31 +95,33 @@ Purpose: predictable building blocks for the app layer.
 Purpose: one place that defines “who are the families” and “what is a message”.
 
 - [x] **Structs:** `family_t` in `model_families.h`; `message_t` in `model_messages.h` (id, from family, label, duration, unread — extend later with timestamp/storage ref).
-- [x] **Dummy table:** families + `ALL` in `model_families.c`; inbox rows in `model_messages.c`.
-- [x] **“Device identity” stub:** `model_my_family_id` — later from NVS/server.
+- [x] **Dummy table:** families + ALLA in `model_families.c`; inbox rows in `model_messages.c`.
+- [x] **Device identity:** `model_my_family_id` in NVS namespace `bullerby`, key `family_id`; first boot uses `CONFIG_BULLERBY_DEFAULT_FAMILY_ID`; **`model_set_my_family_id()`** for later provisioning/server sync.
 - [ ] **Outbox** demo + optional **SPIFFS** for persisted clips (namespaced paths).
 
 ### Phase C — UI shell and navigation
 
 Purpose: replace the single test screen with a real navigation stack.
 
-- [x] **Screen manager:** `screen_id_t` + `lv_screen_load` in `ui_app.c` (home, recording, inbox).
-- [x] **Global chrome:** Top bar on home (battery, inbox badge); inbox/recording have back affordances.
-- [ ] **Round layout helpers:** Center content; use `lv_obj_set_style_radius` / clip or large arc container so lists stay inside the circle.
-- [ ] **Fonts:** Pick 1–2 embedded fonts (Latin + optional Nordic); avoid huge TTF in flash — use LVGL’s binary fonts or subset.
+- [x] **Screen manager:** `lv_screen_load` / `lv_screen_load_anim` in `ui_app.c` (**home**, **recording**); center bubble on home covers inbox affordance until a list screen exists.
+- [x] **Global chrome:** Battery on home; recording has back; message bubble shows count when non-empty.
+- [x] **Round layout (v2):** Ring math + circular widgets + `no_scroll()` — content kept in the visible disc per ui-spec (no scrollable strip).
+- [x] **Fonts:** **Montserrat 14 + 20** Latin-1 subsets in `firmware/main/fonts/` (headers in `fonts.h`); Nordic extras optional later.
 
 **Screens (offline):**
 
 | Screen | Purpose |
 |--------|---------|
-| **Home** | Horizontal **strip** of family bubbles + ALL; drag to pan; tap focal → zoom → record flow |
-| **Recording** | Large record affordance, elapsed time, tap or second tap to stop, cancel |
-| **Sending (fake)** | Short “Sent!” or progress animation (no network — simulate delay) |
-| **Inbox list** | Scrollable list of dummy/received items; badge count on home |
-| **Playback** | Play/pause or auto-play, progress; optional waveform stub |
+| **Home** | **Ring** of family circles + **ALLA**; tap → record; **center bubble** = inbox entry (dummy model) |
+| **Recording** | Large record/stop, family name bar, back; send toast; fade back to home |
+| **Sending (fake)** | Random Swedish one-liner toast (~3 s) — no network |
+| **Inbox list** | **TODO** — scrollable list; today counts + tap path via **bubble** on home |
+| **Playback** | **TODO** — full play UI; bubble + model hooks are placeholders |
 
-- [ ] **Transitions:** Simple fade or slide (LVGL anim); keep FPS smooth on partial flush.
-- [ ] **Swipe / pan polish:** Strip **pan** and **zoom** are implemented in code; **on-device** alignment with **ui-spec** (whole-column scroll vs strip-only, zoom z-order and stability) is **open** — see **ui-spec.md §6.2**. Optional: hardware **gesture** bytes drive carousel once validated (Phase A).
+- [x] **Transitions:** **Fade** between home ↔ record (`LV_SCR_LOAD_ANIM_FADE_ON`, ~180–200 ms).
+- [ ] **Further UI polish:** Dedicated inbox list + playback chrome; optional **gesture** pager (Phase A); extra anims if FPS budget allows.
+
+**Interface:** Treated **complete for now** (Apr 2026); see [ui-spec.md](ui-spec.md) status line. Audio wiring and inbox list are the next UX-moving work.
 
 ### Phase D — Audio product path (offline)
 
@@ -162,7 +166,7 @@ Authoritative layout and interaction rules: **[ui-spec.md](ui-spec.md)**.
 
 - **Safe area:** Treat center ~220 px diameter as primary; outer ring for subtle chrome only.
 - **Touch targets:** Minimum ~44 px for kids; larger for main actions.
-- **Family grid:** e.g. 2×3 or hex layout; **ALL** visually distinct (color/icon).
+- **Family grid:** e.g. 2×3 or hex layout; **ALLA** visually distinct (color/icon).
 - **Swipe between families (optional):** After validating CST816D-reported swipes (Phase A), consider a **pager** UI: one large family tile per screen, **swipe left/right** to change family, **tap** to record. Reduces clutter on a small round display; confirm gestures do not misfire when kids tap.
 - **Recording:** Clear “recording” state (red dot, timer); block accidental navigation.
 - **Vibe:** Playful, colorful, wacky—see [ui-spec.md](ui-spec.md) (neighborhood kids, not corporate a11y).
@@ -241,12 +245,13 @@ Use **`idf.py menuconfig`** for PSRAM, CPU frequency, and optional WiFi disable.
 ## 12. Checklist summary (offline milestone)
 
 - [x] Dummy families + message model
-- [x] Navigation + home / recording / inbox (dedicated **playback** screen still TODO)
-- [ ] Record/stop from UI + max duration (**codec** — UI timer exists as stub)
+- [x] Navigation + **home / recording** + center **message bubble** (inbox list screen + dedicated **playback** screen still TODO)
+- [x] **v2 ring UI shell** — **interface parked** (Apr 2026); see [ui-spec.md](ui-spec.md)
+- [ ] Record/stop from UI + max duration (**codec** — UI timer exists; capture still **BOOT**-triggered until wired)
 - [ ] Opus + SPIFFS persistence (or PCM interim)
 - [ ] Simulated incoming message path
-- [ ] LED + battery warnings
-- [ ] Optional: WiFi stripped from default build for dev
+- [x] **Battery** warning tint on home; **LED** messaging patterns still TODO
+- [x] WiFi optional / off by default for dev (`CONFIG_BULLERBY_ENABLE_WIFI`)
 - [ ] CST816D swipe/gesture evaluation documented; optional pager UX if stable
 
 When this list is done, you are ready to attach **Phase G** networking without changing the fundamental UI flow.
@@ -257,4 +262,4 @@ When this list is done, you are ready to attach **Phase G** networking without c
 
 - [project-plan.md](project-plan.md) — product scope, server API (§3), infrastructure
 - [server/README.md](../server/README.md) — HTTP/WebSocket contract and Wrangler deploy
-- [ui-spec.md](ui-spec.md) — family strip carousel, touch targets, embedded UX
+- [ui-spec.md](ui-spec.md) — v2 ring layout, touch targets, embedded UX

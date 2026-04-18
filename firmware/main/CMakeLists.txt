@@ -1,6 +1,8 @@
 idf_component_register(
     SRC_DIRS
         "."
+        "assets"
+        "fonts"
         "hal"
         "audio"
         "net"
@@ -8,6 +10,8 @@ idf_component_register(
         "model"
     INCLUDE_DIRS
         "."
+        "assets"
+        "fonts"
         "hal"
         "audio"
         "net"

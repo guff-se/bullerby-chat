@@ -7,4 +7,13 @@ menu "Bullerby Chat"
             When disabled, the firmware skips WiFi and netif init — recommended for
             offline UI/audio work (less power use and serial noise).
 
+    config BULLERBY_DEFAULT_FAMILY_ID
+        int "Default family id (first boot only, before NVS has a value)"
+        range 1 255
+        default 8
+        help
+            Written to NVS on first boot if no family_id is stored yet. Per-device
+            assignment uses model_set_my_family_id() or a future provisioning flow;
+            OTA updates keep the value in the nvs partition.
+
 endmenu

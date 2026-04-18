@@ -38,7 +38,7 @@
 #define DISPLAY_BL_PIN          GPIO_NUM_42
 #define DISPLAY_BL_INVERT       true  // 0% duty = full brightness
 
-#define DISPLAY_MIRROR_X        true
+#define DISPLAY_MIRROR_X        false
 #define DISPLAY_MIRROR_Y        false
 
 // --- Touch (CST816D capacitive touch) ---
@@ -51,6 +51,10 @@
 #define CST816D_I2C_ADDR        0x15
 
 #define TOUCH_POLL_MS           10  // Poll interval in milliseconds
+
+/* CST816 → LVGL — must track esp_lcd_panel_mirror X (hal/display.c). MX on → use 0 here. */
+#define TOUCH_MIRROR_X          0
+#define TOUCH_MIRROR_Y          0
 
 // --- Button ---
 #define BOOT_BUTTON_PIN         GPIO_NUM_0

@@ -70,8 +70,16 @@ static void lvgl_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
 {
     (void)indev;
     if (s_touched) {
-        data->point.x = s_touch_x;
-        data->point.y = s_touch_y;
+        lv_coord_t x = (lv_coord_t)s_touch_x;
+        lv_coord_t y = (lv_coord_t)s_touch_y;
+#if TOUCH_MIRROR_X
+        x = (lv_coord_t)(LCD_H_RES - 1 - x);
+#endif
+#if TOUCH_MIRROR_Y
+        y = (lv_coord_t)(LCD_V_RES - 1 - y);
+#endif
+        data->point.x = x;
+        data->point.y = y;
         data->state = LV_INDEV_STATE_PRESSED;
     } else {
         data->state = LV_INDEV_STATE_RELEASED;

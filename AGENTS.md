@@ -149,7 +149,7 @@ While firmware is under active development, **flash right after a successful `id
 
 `ui_app_init` logs a compile-time **build stamp** line so you can confirm in `idf.py monitor` which binary is running. To verify content changes on-device, temporarily edit mock data in `firmware/main/model/model_families.c` (e.g. strip labels).
 
-**UI status / open issues:** The authoritative write-up of what the home strip and zoom code is *trying* to do, versus **on-device challenges** still being debugged (scroll vs whole-column motion, zoom layering, verification discipline), is **`docs/ui-spec.md` §6.2**. **`docs/firmware-plan.md` §3** stays aligned at a high level.
+**UI status:** On-device layout is **v2 ring** (families on a circle, center message bubble) per **`docs/ui-spec.md`**. Implementation notes and open polish (tap feedback, inbox list screen, LED on send) live in that doc’s **Implementation notes** and **Open decisions** sections. **`docs/firmware-plan.md`** section 3 (current state) stays aligned at a high level.
 
 ### Server (`server/`)
 

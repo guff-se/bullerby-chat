@@ -6,6 +6,14 @@ This document defines the **on-device interface** for the ESP32-S3 round display
 **Related:** [project-plan.md](project-plan.md) · [firmware-plan.md](firmware-plan.md) ·
 [product-description.md](product-description.md)
 
+**Status (Apr 2026):** The **v2 ring** home screen, recording screen, center message bubble, Swedish copy, and embedded fonts/assets match this spec closely enough to treat the **on-device interface as done for now**. Further visual polish (press feedback, LED on send, dedicated inbox list) is non-blocking and tracked in [firmware-plan.md](firmware-plan.md) (audio path, Phase C follow-ups).
+
+### Language (Swedish)
+
+The product is **Swedish**: all **user-visible** copy on the device (labels, confirmations, status, future toasts) must be in **Swedish**. Use informal, kid-friendly wording where it fits. **Developer logs** (`ESP_LOGI`, etc.) may stay English for toolchain consistency unless the team agrees otherwise.
+
+Examples: broadcast is **ALLA** (not “ALL”); after send, a **random** whacky Swedish-flavour one-liner appears (pool of ~30 in `ui_app.c`, e.g. **Svisch!**, **Pang i bygget!** — not “WHOOSH!”). When the server API uses English tokens (`ALL`, `broadcast` in JSON), the **firmware UI** still shows Swedish strings mapped from model/config.
+
 ---
 
 ## Design personality (read this first)
@@ -24,28 +32,30 @@ redraws every frame.
 
 ### 1.1 Ring of families
 
-All families (up to ~12) are arranged as **colored circles on the perimeter** of
+**Recipient** families are arranged as **colored circles on the perimeter** of
 the round display, evenly spaced in a clockwise ring starting at 12 o'clock.
+This device’s **own** family (`model_my_family_id`) is **not** shown — you don’t
+pick yourself as the destination. **ALLA** (broadcast) is **always** the first
+slot (12 o'clock), then the remaining families in model order (excluding self).
 
 | Property | Value |
 |----------|-------|
-| Ring radius | 88 px from disc center |
-| Circle diameter | 44 px |
-| Default count | 9 (8 families + ALL) |
+| Ring radius / circle diameter | **Scaled by visible count** `n` (`home_ring_geometry()` in `ui_app.c`): stay inside the disc with a small arc gap; reference ~**90 px** / **56 px** when `n≈9` |
+| Default count | Up to 8 (ALLA + others except self; dummy table has 8 families + ALLA) |
 | Placement formula | `x = cx + R·sin(θ)`, `y = cy − R·cos(θ)`, `θ = 2π·i/n` |
 
 Each circle:
 - **Filled** with a vivid neon color (unique per family, from an 8-shade palette).
 - **Neon glow shadow** matching the fill color.
-- **White abbreviation** label centered inside (`G`, `H`, `ALL`, …).
+- **Emoji** centered inside (raster ARGB assets from `scripts/gen_family_emoji_assets.py`, eight smileys + megaphone for **ALLA**).
 - **Tappable** — opens that family's recording screen.
 
-The **ALL** circle: white fill, thick magenta border, dark label text.
+The **ALLA** circle: white fill, thick magenta border, dark label text.
 
 ### 1.2 Center message bubble
 
 Appears in the **exact center** (120, 120) of the disc **only when messages
-exist**. Hidden when the inbox is empty.
+exist**. Hidden when the inbox is empty. **Diameter 90 px** (see `MSG_BUBBLE_DIA` in `ui_app.c`).
 
 | State | Color | Icon | Count badge |
 |-------|-------|------|-------------|
@@ -72,7 +82,7 @@ and no new messages, the played message is silently discarded and the bubble hid
 ## 2. Family / recording screen
 
 Opened by tapping any ring circle. The selected family's **neon color floods the
-entire screen**. (ALL circle → vivid magenta `#dd00cc`.)
+entire screen**. (ALLA circle → vivid magenta `#dd00cc`.)
 
 ### 2.1 Layout
 
@@ -99,8 +109,8 @@ Red glow shadow (22 px spread) always present — shifts to orange while recordi
 
 When stop is pressed:
 1. Record button **hides**.
-2. **"WHOOSH!"** appears in neon mint `#22ff88` at center, font 20 px.
-3. After **5 seconds** the screen fades back to Home automatically.
+2. A **random** send toast from the whacky-Swedish pool appears in neon mint `#22ff88` at center, font 20 px.
+3. After **3 seconds** the screen fades back to Home automatically.
 4. Tapping **back** cancels the countdown and returns immediately.
 
 Recording is **auto-stopped** at 30 seconds max.
@@ -116,7 +126,7 @@ recording without sending).
 
 - **One clear main action per screen.** Home = choose family or play message.
   Recording = record or back.
-- **Big tap targets.** Smallest interactive element = 38 px; most = 44–84 px.
+- **Big tap targets.** Smallest interactive element = 38 px; most = 56–84 px.
 - **Snappy response.** Touch → visible change ≤ 100 ms feel-time.
 - **Cheap animations.** Shadow-width pulse and fade-on screen transitions only;
   no particles, no full-screen blur stacks.
@@ -146,9 +156,9 @@ center bubble.)*
 | `COL_MSG_PLAYED` | `#ff7700` | Message bubble — replay |
 | `COL_REC_BTN` | `#ff1144` | Record button idle |
 | `COL_STOP_BTN` | `#ff5500` | Record button active |
-| `COL_SENT_TEXT` | `#22ff88` | "WHOOSH!" notification |
-| `COL_ALL_FILL` | `#ffffff` | ALL circle fill |
-| `COL_ALL_BORDER` | `#ff00ff` | ALL circle border |
+| `COL_SENT_TEXT` | `#22ff88` | Random send toast (see `k_sent_toasts[]` in `ui_app.c`) |
+| `COL_ALL_FILL` | `#ffffff` | ALLA circle fill |
+| `COL_ALL_BORDER` | `#ff00ff` | ALLA circle border |
 
 Family neon palette (cycled by `(id−1) mod 8`):
 
@@ -187,7 +197,7 @@ Family neon palette (cycled by `(id−1) mod 8`):
 
 - **Tap feedback:** Currently no press animation on ring circles. A quick
   `transform_scale` squash on `LV_EVENT_PRESSED` would add snappiness.
-- **ALL broadcast flow:** ALL opens the record screen the same as any family. A
+- **ALLA (broadcast):** Opens the recording screen the same as any family. A
   separate "broadcast" visual treatment (e.g., rainbow shimmer on the record BG)
   would be fun.
 - **Volume / haptic feedback:** Not wired yet; LED flash on send would add

@@ -65,18 +65,18 @@ messages, and uses a fixed dummy family list.
 
 **Detailed firmware roadmap:** [firmware-plan.md](firmware-plan.md) (modules, phases, storage, audio, touch/swipe evaluation, testing).
 
-**UI specification (carousel, scale, embedded UX):** [ui-spec.md](ui-spec.md).
+**UI specification (v2 ring layout, touch targets, embedded UX):** [ui-spec.md](ui-spec.md).
+
+**Language:** On-device **user-visible** copy is **Swedish** (see [ui-spec.md](ui-spec.md), Language). Server/API field names and JSON tokens may remain English (e.g. `ALL` / `broadcast` in metadata); the device shows **ALLA** and other Swedish strings in the UI.
 
 ### 2.1 UI (LVGL on 240x240 round LCD)
 
-- **Home screen:** Grid of circular family icons filling the round display
-  - Each icon: a letter or simple pictogram + family name
-  - Last slot: "ALL" icon (broadcast)
-  - Scrollable if >6 families (but targeting ~5-6 families initially)
-  - **Swipe evaluation:** Test hardware-reported swipes (CST816D gesture register) to see if **horizontal swipes** can switch the active family (e.g. carousel); details in [firmware-plan.md](firmware-plan.md).
-- **Recording screen:** Pulsing red circle + timer (0–30s), tap to stop
-- **Inbox indicator:** Badge count on status area + LED blink
-- **Playback screen:** Speaker icon + progress bar, auto-returns to home
+Canonical layout: **[ui-spec.md](ui-spec.md) v2 (ring)** — implemented in firmware today.
+
+- **Home screen:** Ring of **tappable family circles** (neon fill + emoji) around the disc; **ALLA** as broadcast row; **center message bubble** when the dummy inbox has items (play / count / replay affordance)
+- **Recording screen:** Family colour flood, **name in top bar**, large record/stop control, back; after send, **random Swedish toast** then return home
+- **Inbox:** Count and entry via **center bubble** on home; **dedicated inbox list screen** still roadmap (playback UX)
+- **Optional later:** CST816D **gesture** evaluation for swipe-between-families pager — [firmware-plan.md](firmware-plan.md)
 
 ### 2.2 Audio Pipeline
 
@@ -116,7 +116,7 @@ register with server.
   │
   ├─ Tap inbox badge ──► [Playback Screen] ──► Auto-return ──► [Home]
   │
-  └─ Tap "ALL" icon ──► [Recording Screen] ──► Tap again ──► Upload to all ──► [Home]
+  └─ Tap **ALLA** icon ──► [Recording Screen] ──► Tap again ──► Upload to all ──► [Home]
 ```
 
 ---
@@ -256,15 +256,14 @@ In-flight message (server — ephemeral only)
 **Goal:** A complete on-device experience with no network: looks and feels like the
 final product for families, using placeholder data.
 
-- [ ] **Dummy families:** Static list (names, letters/icons) representing ~5–6
-      families + “ALL”; easy to replace later with server-driven config
-- [ ] **Graphic design & LVGL:** Home grid, typography, colors, icons on round screen
-- [ ] **Touch / swipe:** Log and evaluate **CST816D hardware gesture** codes; if reliable, use **swipes** to move between families (carousel); see [firmware-plan.md](firmware-plan.md)
-- [ ] **Recording flow:** Tap family → recording screen (timer, pulsing indicator) →
-      stop; store PCM/Opus locally or in RAM for demo
-- [ ] **Playback flow:** Inbox UI with fake or locally queued “messages”; tap to play
-      through speaker
-- [ ] **Status:** Battery %, recording state, simple inbox badge (dummy counts)
+**Interface checkpoint (Apr 2026):** **v2 ring** home + recording shell + Swedish copy + emoji assets are **done for now** (see [ui-spec.md](ui-spec.md) status). Next focus: **codec from record UI**, **persistence**, **inbox list / playback** product path — not more layout churn on the current screens.
+
+- [x] **Dummy families:** Static table (names, ids) + **ALLA**; replaceable with server config; device family id in **NVS** (`CONFIG_BULLERBY_DEFAULT_FAMILY_ID` default)
+- [x] **Graphic design & LVGL (v2):** Ring of circles, emoji assets, neon palette, center message bubble, record screen typography and controls per ui-spec
+- [ ] **Touch / swipe (optional):** Log / use **CST816D** gesture codes for a future pager or extras — not required for tap-only ring; see [firmware-plan.md](firmware-plan.md)
+- [x] **Recording screen (UI):** Tap ring → full-screen record/stop, **30 s UI cap**, Swedish send toast → home (**I2S from record button** still Phase D — **BOOT** PCM path today)
+- [ ] **Playback product path:** Opus/PCM through speaker from chosen message; **scrollable inbox list** screen TBD (home bubble + dummy model exercise counts / tap)
+- [x] **Status:** Battery % on home; inbox **count** on center bubble (dummy `model_messages`)
 - [ ] **Optional:** Simulate “new message” with a button or timer to test sounds/LEDs
 
 No HTTP, WebSocket, or provisioning in this phase.

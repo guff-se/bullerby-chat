@@ -1,9 +1,9 @@
 #include "model_messages.h"
 
 static message_t s_inbox[] = {
-    {1, 2, "Hansson", 12500, true},
-    {2, 1, "Gustafsson", 8200, true},
-    {3, 5, "Karlsson", 3000, false},
+    {1, 2, "BERGMAN", 12500, true},
+    {2, 1, "ANSUND", 8200, true},
+    {3, 5, "ANNIKA", 3000, false},
 };
 
 size_t model_inbox_count(void)

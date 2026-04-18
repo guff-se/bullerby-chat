@@ -5,10 +5,11 @@ The **HTTP/WebSocket API** and deploy steps for **`server/`** are documented in 
 ```
 bullerby-chat/
 │
+├── scripts/                       # e.g. `gen_family_emoji_assets.py` (Pillow) → `firmware/main/assets/`
 ├── docs/                          # Project documentation
 │   ├── product-description.md     # Hardware specs & pin assignments
 │   ├── project-plan.md            # Master plan & architecture
-│   ├── ui-spec.md                 # On-device UI/UX (carousel, embedded practices)
+│   ├── ui-spec.md                 # On-device UI/UX (v2 ring, embedded practices)
 │   └── repo-structure.md          # This file
 │
 ├── firmware/                      # ESP-IDF project for the device
@@ -17,31 +18,22 @@ bullerby-chat/
 │   ├── partitions.csv             # Flash partition table (16MB)
 │   ├── main/
 │   │   ├── CMakeLists.txt
-│   │   ├── main.c                 # Entry point
-│   │   ├── app.h / app.c         # Application state machine
-│   │   ├── ui/                    # LVGL screens
-│   │   │   ├── ui.h
-│   │   │   ├── screen_home.c      # Family icon grid
-│   │   │   ├── screen_record.c    # Recording screen
-│   │   │   └── screen_playback.c  # Playback screen
-│   │   ├── audio/                 # Audio recording & playback
-│   │   │   ├── audio.h
-│   │   │   ├── recorder.c
-│   │   │   └── player.c
-│   │   ├── net/                   # WiFi, HTTP, WebSocket
-│   │   │   ├── net.h
-│   │   │   ├── wifi.c
-│   │   │   ├── http_client.c
-│   │   │   └── ws_client.c
+│   │   ├── main.c                 # app_main, HAL + LVGL init
+│   │   ├── app/                   # LVGL UI (home ring, record) — `ui_app.c`
+│   │   ├── model/                 # `family_t`, `message_t`, dummy tables, NVS id
+│   │   ├── assets/                # Generated emoji LVGL images (`family_emoji_assets.*`)
+│   │   ├── fonts/                 # Subset Montserrat (`fonts.h`, `lv_font_montserrat_*`)
+│   │   ├── audio/                 # Audio hooks (`audio.c` / `audio.h`)
+│   │   ├── net/                   # WiFi stub (`wifi.c`) — optional `CONFIG_BULLERBY_ENABLE_WIFI`
 │   │   ├── hal/                   # Hardware abstraction
 │   │   │   ├── hal.h
 │   │   │   ├── display.c          # GC9A01 + LVGL setup
 │   │   │   ├── codec.c            # ES8311 I2S setup
+│   │   │   ├── es8311.c
 │   │   │   ├── touch.c            # CST816D touch input
 │   │   │   └── led.c              # Status LED
-│   │   └── provision/             # WiFi provisioning captive portal
-│   │       ├── provision.h
-│   │       └── provision.c
+│   │   ├── board_config.h         # Board pins / touch mirror flags
+│   │   └── idf_component.yml      # Managed LVGL / drivers
 │   └── components/                # Local ESP-IDF components (if any)
 │
 ├── server/                        # Cloudflare Workers
