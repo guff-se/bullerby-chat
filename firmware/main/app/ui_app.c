@@ -18,6 +18,7 @@
 #include "esp_lvgl_port.h"
 #include "esp_random.h"
 
+#include "app_audio.h"
 #include "hal/hal.h"
 #include "fonts.h"
 #include "family_emoji_assets.h"
@@ -88,6 +89,8 @@ typedef enum { MSG_NONE, MSG_AVAILABLE, MSG_PLAYED } msg_state_t;
 
 static lv_obj_t *s_scr_home;
 static lv_obj_t *s_scr_record;
+static lv_obj_t *s_scr_wifi_setup;
+static lv_obj_t *s_wifi_setup_lbl;
 
 /* Home ring */
 static lv_obj_t *s_ring_circles[MAX_FAMILY_CIRCLES];
@@ -365,6 +368,7 @@ static void refresh_msg_bubble(void)
 
 static void do_send_stop(void)
 {
+    app_audio_set_ui_recording(false);
     s_recording  = false;
     s_rec_ticks  = 0;
     if (s_rec_btn)      lv_obj_add_flag(s_rec_btn, LV_OBJ_FLAG_HIDDEN);
@@ -375,7 +379,7 @@ static void do_send_stop(void)
     }
     s_sent_countdown = SENT_TICKS;
     const family_t *f = model_family_by_index(s_open_family_idx);
-    ESP_LOGI(TAG, "Message sent to: %s", f ? f->name : "?");
+    ESP_LOGI(TAG, "Stop/send UI: %s (see main: [UI] logs for capture + playback)", f ? f->name : "?");
 }
 
 /* ── Event handlers ─────────────────────────────────────────────── */
@@ -410,6 +414,7 @@ static void on_ring_circle_tapped(lv_event_t *e)
 
     s_open_family_idx = idx;
     s_idle_ticks      = 0;
+    app_audio_set_ui_recording(false);
     s_recording       = false;
     s_rec_ticks       = 0;
     s_sent_countdown  = 0;
@@ -445,6 +450,7 @@ static void on_rec_btn_tapped(lv_event_t *e)
         /* Start recording */
         s_recording = true;
         s_rec_ticks = 0;
+        app_audio_set_ui_recording(true);
         if (s_rec_idle_dot) lv_obj_add_flag(s_rec_idle_dot, LV_OBJ_FLAG_HIDDEN);
         if (s_rec_stop_lbl) lv_obj_clear_flag(s_rec_stop_lbl, LV_OBJ_FLAG_HIDDEN);
         if (s_rec_btn) {
@@ -452,7 +458,7 @@ static void on_rec_btn_tapped(lv_event_t *e)
             lv_obj_set_style_shadow_color(s_rec_btn, lv_color_hex(COL_STOP_BTN), 0);
         }
         const family_t *f = model_family_by_index(s_open_family_idx);
-        ESP_LOGI(TAG, "Recording to: %s", f ? f->name : "?");
+        ESP_LOGI(TAG, "Record pressed — %s (main task will log [UI] when mic is live)", f ? f->name : "?");
     } else {
         do_send_stop();
     }
@@ -461,6 +467,7 @@ static void on_rec_btn_tapped(lv_event_t *e)
 static void on_back_tapped(lv_event_t *e)
 {
     (void)e;
+    app_audio_set_ui_recording(false);
     s_recording      = false;
     s_rec_ticks      = 0;
     s_sent_countdown = 0;
@@ -520,11 +527,21 @@ static void app_tick_cb(lv_timer_t *t)
 
 /* ── Screen builders ────────────────────────────────────────────── */
 
-static void build_home(void)
+static void home_ring_destroy(void)
 {
-    s_scr_home = lv_obj_create(NULL);
-    style_base_screen(s_scr_home);
+    for (size_t i = 0; i < s_ring_n; i++) {
+        if (s_ring_circles[i]) {
+            lv_obj_delete(s_ring_circles[i]);
+            s_ring_circles[i] = NULL;
+            s_ring_imgs[i] = NULL;
+        }
+    }
+    s_ring_n = 0;
+}
 
+/** Build ring circles as children of `scr` (home screen). */
+static void home_ring_build_on_screen(lv_obj_t *scr)
+{
     const family_t *ring[MAX_FAMILY_CIRCLES];
     size_t n = home_ring_families(ring);
     if (n == 0) {
@@ -551,7 +568,7 @@ static void build_home(void)
         ring_pos((int)i, (int)n, ring_r, ring_dia, &px, &py);
         uint32_t c = fam_color(f);
 
-        lv_obj_t *circ = lv_button_create(s_scr_home);
+        lv_obj_t *circ = lv_button_create(scr);
         lv_obj_remove_style_all(circ);
         lv_obj_set_pos(circ, px, py);
         lv_obj_set_size(circ, ring_dia, ring_dia);
@@ -559,7 +576,6 @@ static void build_home(void)
         lv_obj_set_style_bg_color(circ, lv_color_hex(c), 0);
         lv_obj_set_style_bg_opa(circ, LV_OPA_COVER, 0);
 
-        /* Neon glow matching the family colour (scale with bubble size) */
         {
             int sw = (int)lroundf(16.0f * (float)ring_dia / (float)RING_REF_DIA);
             if (sw < 12) {
@@ -575,7 +591,6 @@ static void build_home(void)
         lv_obj_set_style_shadow_opa(circ, LV_OPA_70, 0);
 
         if (f->is_broadcast) {
-            /* ALLA: thick magenta border for extra chaos */
             lv_obj_set_style_border_width(circ, 3, 0);
             lv_obj_set_style_border_color(circ, lv_color_hex(COL_ALL_BORDER), 0);
             lv_obj_set_style_border_opa(circ, LV_OPA_COVER, 0);
@@ -605,6 +620,31 @@ static void build_home(void)
         s_ring_circles[i] = circ;
         s_ring_imgs[i]    = em;
     }
+}
+
+void ui_app_rebuild_home_ring(void)
+{
+    if (!s_scr_home) {
+        return;
+    }
+    if (!lvgl_port_lock(5000)) {
+        ESP_LOGW(TAG, "rebuild ring: lvgl lock timeout");
+        return;
+    }
+    home_ring_destroy();
+    home_ring_build_on_screen(s_scr_home);
+    if (s_msg_bubble) {
+        lv_obj_move_foreground(s_msg_bubble);
+    }
+    lvgl_port_unlock();
+}
+
+static void build_home(void)
+{
+    s_scr_home = lv_obj_create(NULL);
+    style_base_screen(s_scr_home);
+
+    home_ring_build_on_screen(s_scr_home);
 
     /* Center message bubble */
     s_msg_bubble = lv_button_create(s_scr_home);
@@ -651,6 +691,8 @@ static void build_home(void)
     if (s_msg_state != MSG_NONE) {
         start_bubble_pulse(s_msg_bubble);
     }
+
+    lv_obj_move_foreground(s_msg_bubble);
 }
 
 static void build_record(void)
@@ -666,7 +708,7 @@ static void build_record(void)
 
     lv_obj_t *title_bar = lv_obj_create(s_scr_record);
     lv_obj_remove_style_all(title_bar);
-    lv_obj_set_size(title_bar, LCD_H_RES, 44);
+    lv_obj_set_size(title_bar, LCD_H_RES, 52);
     lv_obj_set_style_bg_color(title_bar, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(title_bar, LV_OPA_40, 0);
     lv_obj_align(title_bar, LV_ALIGN_TOP_MID, 0, 0);
@@ -675,7 +717,7 @@ static void build_record(void)
 
     s_rec_title_lbl = lv_label_create(title_bar);
     lv_label_set_text(s_rec_title_lbl, "");
-    lv_obj_set_style_text_font(s_rec_title_lbl, &lv_font_montserrat_14_latin1, 0);
+    lv_obj_set_style_text_font(s_rec_title_lbl, &lv_font_montserrat_20_latin1, 0);
     lv_obj_set_style_text_color(s_rec_title_lbl, lv_color_hex(0xffffff), 0);
     lv_obj_set_style_bg_opa(s_rec_title_lbl, LV_OPA_TRANSP, 0);
     lv_obj_set_width(s_rec_title_lbl, LCD_H_RES - 16);
@@ -755,6 +797,37 @@ static void build_record(void)
     lv_obj_align(s_sent_lbl, LV_ALIGN_CENTER, 0, -14);
     lv_obj_add_flag(s_sent_lbl, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(s_sent_lbl, LV_OBJ_FLAG_CLICKABLE);
+}
+
+void ui_app_show_wifi_setup(const char *ap_ssid)
+{
+    if (!ap_ssid) {
+        ap_ssid = "?";
+    }
+    if (!lvgl_port_lock(5000)) {
+        ESP_LOGW(TAG, "wifi setup UI: lvgl lock timeout");
+        return;
+    }
+
+    if (!s_scr_wifi_setup) {
+        s_scr_wifi_setup = lv_obj_create(NULL);
+        style_base_screen(s_scr_wifi_setup);
+        s_wifi_setup_lbl = lv_label_create(s_scr_wifi_setup);
+        lv_obj_set_style_text_color(s_wifi_setup_lbl, lv_color_hex(0xffffff), 0);
+        lv_obj_set_style_text_font(s_wifi_setup_lbl, &lv_font_montserrat_14_latin1, 0);
+        lv_label_set_long_mode(s_wifi_setup_lbl, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(s_wifi_setup_lbl, LCD_H_RES - 24);
+        lv_obj_set_style_text_align(s_wifi_setup_lbl, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_align(s_wifi_setup_lbl, LV_ALIGN_CENTER, 0, 0);
+        no_scroll(s_wifi_setup_lbl);
+    }
+
+    char buf[96];
+    snprintf(buf, sizeof(buf), "Connect to\n%s\nto set up WiFi", ap_ssid);
+    lv_label_set_text(s_wifi_setup_lbl, buf);
+    lv_screen_load(s_scr_wifi_setup);
+
+    lvgl_port_unlock();
 }
 
 /* ── Entry point ─────────────────────────────────────────────────── */

@@ -99,7 +99,7 @@ recorded clips during development).
   - Auto-reconnect with exponential backoff
 - **Message upload:** `POST /api/messages` — `multipart/form-data`: field **`audio`** (file), **`metadata`** (JSON string: `to_family_id`, `duration_s`, **`sample_rate_hz`** — defaults to `16000` if omitted; omit or `"ALL"`/`broadcast` for broadcast)
 - **Message download:** `GET` the **`download_url`** from the `new_message` WebSocket event — signed query **`exp`** + **`sig`**, **not** a server inbox to poll
-- **Config sync:** On boot, **`GET /api/devices/{id}/config`** (authenticated); same JSON shape as bundled `bullerby.json` families + device assignment
+- **Config sync:** After WiFi, **`GET /api/devices/{id}/config`** (authenticated) returns `family_id`, `families[]` (`id`, `name`, `icon`) — firmware applies this to the in-memory family model and refreshes the home ring (see `model_apply_server_config_json` in `firmware/main/model/model_families.c`). Until then, a static table matches the bundled JSON for offline dev.
 
 ### 2.4 Provisioning (First-Time Setup)
 
@@ -286,7 +286,7 @@ No HTTP, WebSocket, or provisioning in this phase.
 - [x] **HTTP + WebSocket client** (`firmware/main/net/`) — HTTPS via `esp_http_client` + mbedTLS cert bundle, WSS via `esp_websocket_client`.
 - [x] **BOOT-hold capture uploads** to the server (broadcast), clipped to the 128 KiB server cap.
 - [x] **Remote audio playback** on the device (worker task + 128 KiB PSRAM download buffer).
-- [ ] Replace dummy family list with **server-fetched** `families[]` (today we log `GET .../config` and keep the static table).
+- [x] Replace dummy family list with **server-fetched** `families[]` after a successful `GET …/config` (static table remains the offline / pre-config fallback).
 - [ ] **Route record-screen sends** from UI to `net_send_pcm(family->server_id, …)` instead of broadcast-only (wire up via `model_family_by_server_id`).
 - [ ] Opus encode (today: **raw PCM** at 24 kHz mono — fits the 128 KiB cap for ≤ ~2.7 s clips).
 - [ ] Captive portal WiFi provisioning + server URL in NVS (today: `Kconfig` / NVS pre-seeded).

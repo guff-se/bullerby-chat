@@ -30,3 +30,10 @@ const family_t *model_family_by_index(size_t index);
 const family_t *model_family_by_id(uint8_t id);
 /** Look up a family by its server id (e.g. `family-a`). NULL if unknown. */
 const family_t *model_family_by_server_id(const char *server_id);
+
+/**
+ * Replace the in-memory family list from `GET …/config` JSON (fields `family_id`,
+ * `families`[] with `id`, `name`, `icon`). Appends ALLA broadcast. Persists
+ * `model_my_family_id` to NVS. On error, leaves the previous list unchanged.
+ */
+esp_err_t model_apply_server_config_json(const char *json);

@@ -7,6 +7,8 @@
  *  - Network (CONFIG_BULLERBY_ENABLE_NET): WiFi → register → WS → relay playback
  */
 
+#include <stdatomic.h>
+
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -24,6 +26,7 @@
 
 #include "hal/hal.h"
 #include "app/ui_app.h"
+#include "app/app_audio.h"
 #include "model/model_families.h"
 
 #if CONFIG_BULLERBY_ENABLE_NET
@@ -49,6 +52,14 @@ static int16_t *s_cap_buf = NULL;
 static int16_t *s_mono_buf = NULL;
 
 static SemaphoreHandle_t s_audio_lock;
+
+/** Set from LVGL when the record screen starts/stops capture (`audio_task` polls this). */
+static atomic_bool s_ui_mic_recording = ATOMIC_VAR_INIT(false);
+
+void app_audio_set_ui_recording(bool active)
+{
+    atomic_store_explicit(&s_ui_mic_recording, active, memory_order_release);
+}
 
 static void audio_lock(void)
 {
@@ -119,7 +130,71 @@ static void play_mono_pcm(const int16_t *mono, size_t mono_bytes, int sample_rat
     }
 }
 
-/* ── BOOT-button capture loop ───────────────────────────────────────── */
+/** Log duration, warn on very short clips, report peak of first ~200 ms for mic sanity. */
+static void log_capture_stats(const char *ctx, size_t mono_bytes, const int16_t *mono)
+{
+    float sec = (float)mono_bytes / (float)(AUDIO_SAMPLE_RATE * sizeof(int16_t));
+    ESP_LOGI(TAG, "[%s] PCM captured: %u mono bytes (%.2f s @ %d Hz)",
+             ctx, (unsigned)mono_bytes, sec, AUDIO_SAMPLE_RATE);
+    if (mono_bytes < (size_t)(AUDIO_SAMPLE_RATE * sizeof(int16_t) / 10)) {
+        ESP_LOGW(TAG, "[%s] clip shorter than ~100 ms — mic may be silent or stop was very fast",
+                 ctx);
+    }
+    if (mono_bytes < sizeof(int16_t)) {
+        return;
+    }
+    int peak = 0;
+    size_t samples = mono_bytes / sizeof(int16_t);
+    size_t scan = samples > 4800 ? 4800 : samples;
+    for (size_t i = 0; i < scan; i++) {
+        int s = mono[i];
+        if (s < 0) {
+            s = -s;
+        }
+        if (s > peak) {
+            peak = s;
+        }
+    }
+    ESP_LOGI(TAG, "[%s] level check (~first 200 ms): peak=%d / 32767 (%.1f%% FS)",
+             ctx, peak, (double)(100.0f * (float)peak / 32767.0f));
+}
+
+static void finish_capture_and_play(const char *ctx, size_t cap_stereo_bytes)
+{
+    size_t mono_bytes = deinterleave_left(s_cap_buf, cap_stereo_bytes, s_mono_buf);
+    log_capture_stats(ctx, mono_bytes, s_mono_buf);
+
+    if (mono_bytes > 0) {
+        ESP_LOGI(TAG, "[%s] speaker playback starting…", ctx);
+        play_mono_pcm(s_mono_buf, mono_bytes, AUDIO_SAMPLE_RATE);
+        ESP_LOGI(TAG, "[%s] speaker playback done", ctx);
+    } else {
+        ESP_LOGW(TAG, "[%s] no audio samples — skipping playback", ctx);
+    }
+
+#if CONFIG_BULLERBY_ENABLE_NET
+    if (mono_bytes > 0 && net_is_online()) {
+        size_t up_bytes = mono_bytes > UPLOAD_CAP_BYTES ? UPLOAD_CAP_BYTES : mono_bytes;
+        if (up_bytes < mono_bytes) {
+            ESP_LOGW(TAG, "[%s] clipping upload to %u bytes (server 128 KiB cap)",
+                     ctx, (unsigned)up_bytes);
+        }
+        float duration = (float)up_bytes / (float)(AUDIO_SAMPLE_RATE * 2);
+        esp_err_t uerr = net_send_pcm(NULL /* broadcast */,
+                                      (const uint8_t *)s_mono_buf, up_bytes,
+                                      AUDIO_SAMPLE_RATE, duration);
+        if (uerr == ESP_OK) {
+            ESP_LOGI(TAG, "[%s] upload finished OK", ctx);
+        } else {
+            ESP_LOGW(TAG, "[%s] upload failed: %s", ctx, esp_err_to_name(uerr));
+        }
+    } else if (mono_bytes > 0) {
+        ESP_LOGI(TAG, "[%s] offline — skipping upload", ctx);
+    }
+#endif
+}
+
+/* ── Mic capture: UI record screen + BOOT-button hold ─────────────── */
 
 static void audio_task(void *arg)
 {
@@ -143,53 +218,62 @@ static void audio_task(void *arg)
     i2s_chan_handle_t rx = hal_codec_get_rx();
 
     for (;;) {
+        /* UI-driven capture (touch Record on family screen) */
+        if (atomic_load_explicit(&s_ui_mic_recording, memory_order_acquire)) {
+            audio_lock();
+            ESP_LOGI(TAG, "[UI] microphone capture started (stop button or timeout ends session)");
+            hal_led_set(true);
+            i2s_channel_enable(rx);
+            size_t cap_bytes = 0;
+            while (atomic_load_explicit(&s_ui_mic_recording, memory_order_relaxed) &&
+                   cap_bytes < AUDIO_BUF_BYTES) {
+                size_t got = 0;
+                esp_err_t r = i2s_channel_read(rx, (uint8_t *)s_cap_buf + cap_bytes,
+                                               1024, &got, pdMS_TO_TICKS(150));
+                if (r != ESP_OK) {
+                    ESP_LOGW(TAG, "[UI] i2s_channel_read: %s", esp_err_to_name(r));
+                    break;
+                }
+                if (got == 0) {
+                    ESP_LOGD(TAG, "[UI] i2s read returned 0 bytes (timeout)");
+                }
+                cap_bytes += got;
+            }
+            i2s_channel_disable(rx);
+            hal_led_set(false);
+            ESP_LOGI(TAG, "[UI] microphone capture ended, raw stereo ring buffer: %u bytes",
+                     (unsigned)cap_bytes);
+            finish_capture_and_play("UI", cap_bytes);
+            audio_unlock();
+            vTaskDelay(pdMS_TO_TICKS(300));
+            continue;
+        }
+
         if (gpio_get_level(PIN_BOOT_BTN) != 0) {
             vTaskDelay(pdMS_TO_TICKS(50));
             continue;
         }
 
         audio_lock();
-        ESP_LOGI(TAG, "recording…");
+        ESP_LOGI(TAG, "[BOOT] hold-to-capture started (release button or buffer full to stop)");
         hal_led_set(true);
 
         i2s_channel_enable(rx);
         size_t cap_bytes = 0;
         while (gpio_get_level(PIN_BOOT_BTN) == 0 && cap_bytes < AUDIO_BUF_BYTES) {
             size_t got = 0;
-            i2s_channel_read(rx, (uint8_t *)s_cap_buf + cap_bytes,
-                             1024, &got, portMAX_DELAY);
+            esp_err_t r = i2s_channel_read(rx, (uint8_t *)s_cap_buf + cap_bytes,
+                                           1024, &got, portMAX_DELAY);
+            if (r != ESP_OK) {
+                ESP_LOGW(TAG, "[BOOT] i2s_channel_read: %s", esp_err_to_name(r));
+                break;
+            }
             cap_bytes += got;
         }
         i2s_channel_disable(rx);
         hal_led_set(false);
-
-        size_t mono_bytes = deinterleave_left(s_cap_buf, cap_bytes, s_mono_buf);
-        ESP_LOGI(TAG, "captured %u mono bytes (%.1f s @ %d Hz)",
-                 (unsigned)mono_bytes,
-                 (float)mono_bytes / (AUDIO_SAMPLE_RATE * 2),
-                 AUDIO_SAMPLE_RATE);
-
-        if (mono_bytes > 0) {
-            play_mono_pcm(s_mono_buf, mono_bytes, AUDIO_SAMPLE_RATE);
-        }
-
-#if CONFIG_BULLERBY_ENABLE_NET
-        /* Upload — clip to server cap, send as broadcast. */
-        if (mono_bytes > 0 && net_is_online()) {
-            size_t up_bytes = mono_bytes > UPLOAD_CAP_BYTES ? UPLOAD_CAP_BYTES : mono_bytes;
-            if (up_bytes < mono_bytes) {
-                ESP_LOGW(TAG, "clipping upload to %u bytes (server 128 KiB cap)",
-                         (unsigned)up_bytes);
-            }
-            float duration = (float)up_bytes / (AUDIO_SAMPLE_RATE * 2);
-            esp_err_t uerr = net_send_pcm(NULL /* broadcast */,
-                                          (const uint8_t *)s_mono_buf, up_bytes,
-                                          AUDIO_SAMPLE_RATE, duration);
-            if (uerr != ESP_OK) {
-                ESP_LOGW(TAG, "upload failed: %s", esp_err_to_name(uerr));
-            }
-        }
-#endif
+        ESP_LOGI(TAG, "[BOOT] capture ended, raw stereo ring buffer: %u bytes", (unsigned)cap_bytes);
+        finish_capture_and_play("BOOT", cap_bytes);
         audio_unlock();
 
         vTaskDelay(pdMS_TO_TICKS(300));
@@ -257,5 +341,5 @@ void app_main(void)
 
     xTaskCreate(audio_task, "audio", 4096, NULL, 5, NULL);
 
-    ESP_LOGI(TAG, "Ready. Tap a family circle → record; BOOT hold → capture + upload + loopback.");
+    ESP_LOGI(TAG, "Ready. Record: open a family → red button (serial tag [UI]); or BOOT hold ([BOOT]).");
 }

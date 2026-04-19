@@ -4,8 +4,10 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "nvs.h"
 #include "sdkconfig.h"
+#include <stdio.h>
 
 static const char *TAG = "identity";
 
@@ -80,6 +82,15 @@ esp_err_t identity_init(void)
     while (url_len > 0 && s_server_url[url_len - 1] == '/') {
         s_server_url[--url_len] = '\0';
     }
+
+#if defined(CONFIG_BULLERBY_DEVICE_ID_FROM_MAC) && CONFIG_BULLERBY_DEVICE_ID_FROM_MAC
+    {
+        uint8_t mac[6];
+        esp_read_mac(mac, ESP_MAC_WIFI_STA);
+        snprintf(s_device_id, sizeof(s_device_id), "esp-%02x%02x%02x%02x%02x%02x",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    }
+#endif
 
     ESP_LOGI(TAG, "device_id=\"%s\" server_url=\"%s\" secret_set=%s",
              s_device_id, s_server_url,

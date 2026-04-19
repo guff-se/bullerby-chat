@@ -26,7 +26,11 @@ menu "Bullerby Chat"
         depends on BULLERBY_ENABLE_NET
         default ""
         help
-            Leave empty to require values from NVS (future provisioning UI).
+            NVS bullerby/wifi_ssid (and wifi_pass) is tried first. If NVS has no
+            SSID, this Kconfig value is used when non-empty. If there are still no
+            credentials, or STA cannot get an IP in 45 s, the device opens an open
+            SoftAP (name Bullerby-XXXX) with a captive portal to store credentials
+            in NVS, then reboots.
 
     config BULLERBY_WIFI_PASS
         string "WiFi password"
@@ -45,6 +49,15 @@ menu "Bullerby Chat"
         string "Device id (matches server/config/bullerby.json devices[].id)"
         depends on BULLERBY_ENABLE_NET
         default "device-uuid-001"
+
+    config BULLERBY_DEVICE_ID_FROM_MAC
+        bool "Override device id with esp-<12 hex> from factory WiFi MAC"
+        depends on BULLERBY_ENABLE_NET
+        default n
+        help
+            When enabled, after NVS/Kconfig load the device id string is replaced
+            with esp- plus the six WiFi MAC bytes in hex. Add that exact string as
+            a devices[].id entry in server/config/bullerby.json.
 
     config BULLERBY_DEVICE_SECRET
         string "Shared device secret (matches BULLERBY_DEVICE_SECRET on the Worker)"

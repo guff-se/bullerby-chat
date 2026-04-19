@@ -9,8 +9,11 @@
 /** `POST {server}/api/devices/register` — verifies auth + allowlist. */
 esp_err_t api_register(void);
 
-/** `GET {server}/api/devices/{id}/config` — logs families on success. */
-esp_err_t api_fetch_config(void);
+/**
+ * `GET {server}/api/devices/{id}/config`.
+ * On ESP_OK, writes NUL-terminated JSON into `body` (cap bytes) and `*out_len`.
+ */
+esp_err_t api_fetch_config(char *body, size_t cap, size_t *out_len);
 
 /**
  * `POST {server}/api/messages` (multipart/form-data).

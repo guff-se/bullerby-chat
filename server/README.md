@@ -27,7 +27,7 @@ After updating the secret in the dashboard, wait a few seconds before calling au
 
 ## Config
 
-Edit **`config/bullerby.json`** (families + one device per family), commit, then `npm run deploy`. Devices see updates on the next `GET /api/devices/{id}/config` or after a WebSocket reconnect (you can add `config_updated` broadcasts later).
+Edit **`config/bullerby.json`** (families + one device per family), commit, then `npm run deploy`. Devices see updates on the next `GET /api/devices/{id}/config` or after a WebSocket reconnect (you can add `config_updated` broadcasts later). Each **`devices[].id`** must match the firmware **`X-Device-Id`** (Kconfig / NVS, or `esp-xxxxxxxxxxxx` when **Bullerby Chat → Derive device id from chip WiFi MAC** is enabled in menuconfig).
 
 ## Testing (required before deploy)
 

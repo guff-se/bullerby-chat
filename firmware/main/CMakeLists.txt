@@ -31,6 +31,7 @@ idf_component_register(
         app_update
         esp-tls
         esp_http_client
+        esp_http_server
         esp_websocket_client
         mbedtls
         json

@@ -53,9 +53,9 @@ Already in place:
 - CST816D touch → LVGL pointer device; **hardware gesture** register is **read and logged** on change (not yet driving carousel logic)
 - ES8311 + I2S at 24 kHz; **boot-button** hold → record to PSRAM → release → playback (PCM loopback)
 - Battery % + charging flag on screen; **low-battery** tint below `BATTERY_PCT_LOW_WARN` (15%); status LED
-- **Networking** (Phase G — landed Apr 2026) behind **`CONFIG_BULLERBY_ENABLE_NET`** (off by default): WiFi STA (`CONFIG_BULLERBY_WIFI_SSID/PASS`) → `api_register` + `api_fetch_config` → `wss://…/api/ws` with 30 s heartbeat → on `new_message`, signed HTTPS GET → I2S playback at sender's `sample_rate_hz`. BOOT-hold capture also uploads mono PCM via multipart POST when online (clipped to the server's 128 KiB cap). All HTTPS/WSS verified against the **mbedTLS cert bundle** (`esp_crt_bundle_attach`)
-- **Model:** `family_t` + dummy families + **ALLA** (broadcast, `is_broadcast`); **`message_t`** + in-memory **inbox** (`model_messages.c`); **`model_my_family_id`** loaded from **NVS** (`model_init()`), survives OTA; optional **`model_set_my_family_id()`** for provisioning
-- **UI (`ui_app.c`):** **Home** = **ring of family circles** (even angular spacing, emoji inside each) + **status** (battery); **center message bubble** when the dummy inbox has items (tap → model mark-read / state); **Recording** = full-bleed family colour, title bar, **Record/Stop**, back, **random Swedish send toast**, **30 s max** UI timer (**real** I2S capture still via **BOOT** until Phase D wires codec to the button). No horizontal strip / zoom overlay in current tree — superseded by v2 (see **ui-spec.md** implementation notes).
+- **Networking** (Phase G — landed Apr 2026) behind **`CONFIG_BULLERBY_ENABLE_NET`** (off by default in `sdkconfig.defaults`; may be on in a checked-in `sdkconfig`): WiFi STA from **`CONFIG_BULLERBY_WIFI_SSID/PASS`** when SSID is non-empty, else NVS `bullerby` keys **`wifi_ssid`** / **`wifi_pass`** → `api_register` + `api_fetch_config` → `wss://…/api/ws` with 30 s heartbeat → on `new_message`, signed HTTPS GET → I2S playback at sender's `sample_rate_hz`. BOOT-hold capture also uploads mono PCM via multipart POST when online (clipped to the server's 128 KiB cap). All HTTPS/WSS verified against the **mbedTLS cert bundle** (`esp_crt_bundle_attach`)
+- **Model:** `family_t` + **ALLA** (broadcast); **`message_t`** + in-memory **inbox** (`model_messages.c`); **`model_my_family_id`** from **NVS** then **`GET …/config`** `family_id` via **`model_apply_server_config_json()`** when net is up; static `family-a`…`h` table is the offline fallback; optional **`model_set_my_family_id()`** for provisioning
+- **UI (`ui_app.c`):** **Home** = **ring of family circles** (even angular spacing, emoji inside each) + **status** (battery); **center message bubble** when the dummy inbox has items (tap → model mark-read / state); **Recording** = full-bleed family colour, title bar, **Record/Stop**, back, **random Swedish send toast**, **30 s max** UI timer; **Record/Stop** drives **real** I2S capture on `audio_task` (same pipeline as **BOOT** hold: PCM → loopback + optional upload). No horizontal strip / zoom overlay in current tree — superseded by v2 (see **ui-spec.md** implementation notes).
 
 **Gaps for product UX:** Record/stop drives **I2S** from the UI; Opus + SPIFFS; **dedicated inbox list** + decode→speaker playback; optional **LED / sound** on send; optional CST816D **gesture** pager; richer **screen transitions** beyond fade.
 
@@ -99,7 +99,7 @@ Purpose: one place that defines “who are the families” and “what is a mess
 
 - [x] **Structs:** `family_t` in `model_families.h` (local `id`, Swedish `name`, `is_broadcast`, **`server_id`** for API round-trips); `message_t` in `model_messages.h` (id, from family, label, duration, unread — extend later with timestamp/storage ref).
 - [x] **Dummy table:** families + ALLA in `model_families.c`; inbox rows in `model_messages.c`. Firmware table is aligned with `server/config/bullerby.json` (8 families; `family-a`…`family-h`).
-- [x] **Device identity:** `model_my_family_id` in NVS namespace `bullerby`, key `family_id`; first boot uses `CONFIG_BULLERBY_DEFAULT_FAMILY_ID`; **`model_set_my_family_id()`** for later provisioning/server sync.
+- [x] **Device identity:** `model_my_family_id` in NVS namespace `bullerby`, key `family_id`; first boot uses `CONFIG_BULLERBY_DEFAULT_FAMILY_ID`; **`model_set_my_family_id()`** for later provisioning. With **`CONFIG_BULLERBY_ENABLE_NET`**, server config overwrites the local id from `family_id` and re-persists NVS. Optional **`CONFIG_BULLERBY_DEVICE_ID_FROM_MAC`** sets `device_id` to `esp-` + 12 hex WiFi MAC (add matching `devices[].id` in `server/config/bullerby.json`).
 - [ ] **Outbox** demo + optional **SPIFFS** for persisted clips (namespaced paths).
 
 ### Phase C — UI shell and navigation
@@ -130,7 +130,7 @@ Purpose: replace the single test screen with a real navigation stack.
 
 Purpose: match product requirements while staying disconnected.
 
-- [ ] **Recording from UI:** Start/stop from recording screen drives **real** I2S capture (today: **BOOT** only; UI timer is a stub toward max duration, e.g. 30 s).
+- [x] **Recording from UI:** Start/stop on the record screen toggles **`app_audio_set_ui_recording`** → `main.c` `audio_task` I2S capture (30 s UI cap unchanged). **BOOT** hold remains for quick capture without opening the screen.
 - [ ] **Buffer strategy:** PSRAM ring or fixed buffer; stop cleanly on max time or user stop.
 - [ ] **Opus:** Encode pipeline (ESP-ADF or `libopus` component); store `.opus` blobs on SPIFFS or raw PCM first then convert.
 - [ ] **Playback:** Decode Opus → I2S; enable PA only during play.
@@ -157,7 +157,7 @@ The partition table already has **8 MB SPIFFS** (`storage`).
 Behind `CONFIG_BULLERBY_ENABLE_NET=y`. All files live under `firmware/main/net/`.
 
 - [x] **Identity:** `net/identity.c` reads NVS namespace `bullerby` keys `device_id` / `device_secret` / `server_url`; falls back to `CONFIG_BULLERBY_DEVICE_ID` / `DEVICE_SECRET` / `SERVER_URL`. Trailing slash on `server_url` stripped.
-- [x] **WiFi manager:** `net/wifi.c` starts STA non-blocking, auto-reconnects on drop; `wifi_wait_connected(ms)` for the net worker.
+- [x] **WiFi manager:** `net/wifi.c` — `wifi_init_driver()` (STA+AP netifs), `wifi_sta_connect()` for first join (45 s timeout), then STA auto-reconnect on drop. **Credential order:** NVS `bullerby` keys `wifi_ssid` / `wifi_pass` first, then non-empty `CONFIG_BULLERBY_WIFI_SSID` / `PASS`. If no credentials or STA times out: open SoftAP **`Bullerby-` + MAC** (`wifi_portal.c`), DHCP captive-portal URI, DNS redirect (`dns_server.c` from ESP-IDF example), HTTP form POST `/save` → NVS → `esp_restart()`. **UI:** `ui_app_show_wifi_setup()` tells the user which SSID to join. `wifi_wait_connected()` in `net_worker` after successful bootstrap.
 - [x] **HTTPS:** `net/api_client.c` — `POST /api/devices/register`, `GET /api/devices/{id}/config` (logged), `POST /api/messages` (multipart/form-data with boundary `----bullerby7f3c2e9a`, mono PCM + `Authorization: Bearer` + `X-Device-Id` headers, metadata JSON with `sample_rate_hz`), `GET <signed_url>` for audio. mbedTLS cert bundle via `esp_crt_bundle_attach`.
 - [x] **WebSocket:** `net/ws_client.c` opens `wss://…/api/ws` via `esp_websocket_client`, 30 s heartbeat, reassembles fragmented text frames into a 4 KiB buffer, parses `new_message` (`message_id`, `from_family_id`, `sample_rate_hz`, `duration_s`, `download_url`), dispatches to a callback.
 - [x] **Orchestrator:** `net/net.c` — worker task drains an inbox queue, downloads audio to a 128 KiB PSRAM buffer, hands it to `main.c` for playback. `net_send_pcm(to_family_server_id, pcm, len, sr, duration)` wraps the upload for the BOOT-hold capture path.
@@ -256,7 +256,7 @@ Use **`idf.py menuconfig`** for PSRAM, CPU frequency, and optional WiFi disable.
 - [x] Dummy families + message model
 - [x] Navigation + **home / recording** + center **message bubble** (inbox list screen + dedicated **playback** screen still TODO)
 - [x] **v2 ring UI shell** — **interface parked** (Apr 2026); see [ui-spec.md](ui-spec.md)
-- [ ] Record/stop from UI + max duration (**codec** — UI timer exists; capture still **BOOT**-triggered until wired)
+- [x] Record/stop from UI + max duration — **codec** path in `main.c` shared with BOOT hold
 - [ ] Opus + SPIFFS persistence (or PCM interim)
 - [ ] Simulated incoming message path
 - [x] **Battery** warning tint on home; **LED** messaging patterns still TODO

@@ -1,23 +1,30 @@
 #ifndef NET_WIFI_H
 #define NET_WIFI_H
 
-#include <esp_err.h>
+#include <stddef.h>
+
+#include "esp_err.h"
 #include <stdbool.h>
 
+/** Once: netif + default STA/AP + `esp_wifi_init` + event handlers. */
+esp_err_t wifi_init_driver(void);
+
 /**
- * Bring up the WiFi station and keep it connected in the background.
- * Reads credentials from `ssid` / `password` (usually Kconfig defaults).
- * Returns ESP_OK once the station has started — the event loop will drive
- * connect / reconnect. `wifi_is_connected()` reflects live state.
- *
- * Safe to call once only.
+ * Start STA with credentials and block until IPv4 or timeout.
+ * Call only after `wifi_init_driver()`.
  */
-esp_err_t wifi_init_sta(const char *ssid, const char *password);
+bool wifi_sta_connect(const char *ssid, const char *password, int timeout_ms);
 
-/** True while the station holds an IPv4 lease. */
+/** SoftAP SSID for setup, e.g. Bullerby-A1B2 (from STA MAC). */
+void wifi_build_setup_ap_ssid(char *out, size_t out_sz);
+
+/**
+ * Open SoftAP `ap_ssid` (no password), DHCP option 114 for captive detection.
+ * Stops STA if running. Call only after `wifi_init_driver()`.
+ */
+void wifi_enter_softap(const char *ap_ssid);
+
 bool wifi_is_connected(void);
-
-/** Block up to `timeout_ms` waiting for a GOT_IP event; returns true if obtained. */
 bool wifi_wait_connected(int timeout_ms);
 
 #endif // NET_WIFI_H

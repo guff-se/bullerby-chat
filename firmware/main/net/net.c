@@ -4,6 +4,7 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "nvs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -11,10 +12,20 @@
 
 #include "api_client.h"
 #include "identity.h"
+#include "model_families.h"
 #include "wifi.h"
+#include "wifi_portal.h"
 #include "ws_client.h"
 
+#if CONFIG_BULLERBY_ENABLE_NET
+#include "ui_app.h"
+#endif
+
 static const char *TAG = "net";
+
+#define NVS_NS_WIFI       "bullerby"
+#define NVS_KEY_WIFI_SSID "wifi_ssid"
+#define NVS_KEY_WIFI_PASS "wifi_pass"
 
 /* Signed URL + metadata is small; 512 B per event is plenty. */
 #define INBOX_URL_MAX     384
@@ -69,9 +80,18 @@ static void net_worker(void *arg)
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
 
-    /* 3) Fetch config (logs it; future: feed into model). */
+    /* 3) Fetch config → families + my family from server. */
+    char cfg_body[3072];
     for (int i = 0; i < 5; i++) {
-        if (api_fetch_config() == ESP_OK) break;
+        size_t cfg_len = 0;
+        if (api_fetch_config(cfg_body, sizeof(cfg_body), &cfg_len) == ESP_OK && cfg_len > 0) {
+            if (model_apply_server_config_json(cfg_body) == ESP_OK) {
+#if CONFIG_BULLERBY_ENABLE_NET
+                ui_app_rebuild_home_ring();
+#endif
+            }
+            break;
+        }
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
 
@@ -122,6 +142,51 @@ bool net_is_online(void)
     return s_online;
 }
 
+/** NVS `bullerby` keys first; else Kconfig when SSID non-empty. */
+static bool load_stored_wifi_credentials(char *ssid_out, size_t ssid_sz,
+                                         char *pass_out, size_t pass_sz)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NS_WIFI, NVS_READONLY, &h);
+    if (err == ESP_OK) {
+        size_t sz = ssid_sz;
+        err = nvs_get_str(h, NVS_KEY_WIFI_SSID, ssid_out, &sz);
+        if (err == ESP_OK && ssid_out[0] != '\0') {
+            sz = pass_sz;
+            esp_err_t perr = nvs_get_str(h, NVS_KEY_WIFI_PASS, pass_out, &sz);
+            if (perr == ESP_ERR_NVS_NOT_FOUND) {
+                pass_out[0] = '\0';
+            } else if (perr != ESP_OK) {
+                ESP_LOGW(TAG, "nvs_get_str(%s): %s — empty password",
+                         NVS_KEY_WIFI_PASS, esp_err_to_name(perr));
+                pass_out[0] = '\0';
+            }
+            nvs_close(h);
+            ESP_LOGI(TAG, "WiFi credentials from NVS");
+            return true;
+        }
+        nvs_close(h);
+    }
+
+#ifdef CONFIG_BULLERBY_WIFI_SSID
+    const char *cfg_ssid = CONFIG_BULLERBY_WIFI_SSID;
+#else
+    const char *cfg_ssid = "";
+#endif
+#ifdef CONFIG_BULLERBY_WIFI_PASS
+    const char *cfg_pass = CONFIG_BULLERBY_WIFI_PASS;
+#else
+    const char *cfg_pass = "";
+#endif
+    if (cfg_ssid && cfg_ssid[0] != '\0') {
+        strlcpy(ssid_out, cfg_ssid, ssid_sz);
+        strlcpy(pass_out, cfg_pass ? cfg_pass : "", pass_sz);
+        ESP_LOGI(TAG, "WiFi credentials from Kconfig");
+        return true;
+    }
+    return false;
+}
+
 esp_err_t net_start(void)
 {
     if (!identity_is_configured()) {
@@ -129,25 +194,33 @@ esp_err_t net_start(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-#ifdef CONFIG_BULLERBY_WIFI_SSID
-    const char *ssid = CONFIG_BULLERBY_WIFI_SSID;
-#else
-    const char *ssid = "";
-#endif
-#ifdef CONFIG_BULLERBY_WIFI_PASS
-    const char *pass = CONFIG_BULLERBY_WIFI_PASS;
-#else
-    const char *pass = "";
-#endif
-    if (!ssid || ssid[0] == '\0') {
-        ESP_LOGE(TAG, "WiFi SSID empty — set CONFIG_BULLERBY_WIFI_SSID");
-        return ESP_ERR_INVALID_STATE;
+    esp_err_t err = wifi_init_driver();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "wifi_init_driver: %s", esp_err_to_name(err));
+        return err;
     }
 
-    esp_err_t err = wifi_init_sta(ssid, pass);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "wifi_init_sta: %s", esp_err_to_name(err));
-        return err;
+    char ssid[33] = {0};
+    char pass[65] = {0};
+    bool have_creds = load_stored_wifi_credentials(ssid, sizeof(ssid), pass, sizeof(pass));
+    bool sta_ok = false;
+    if (have_creds) {
+        sta_ok = wifi_sta_connect(ssid, pass, 45000);
+        if (!sta_ok) {
+            ESP_LOGW(TAG, "stored WiFi did not connect — captive portal");
+        }
+    } else {
+        ESP_LOGI(TAG, "no WiFi credentials — captive portal");
+    }
+
+    if (!sta_ok) {
+        char ap_ssid[33];
+        wifi_build_setup_ap_ssid(ap_ssid, sizeof(ap_ssid));
+#if CONFIG_BULLERBY_ENABLE_NET
+        ui_app_show_wifi_setup(ap_ssid);
+#endif
+        wifi_portal_run(ap_ssid);
+        return ESP_OK;
     }
 
     s_dl_buf = heap_caps_malloc(DOWNLOAD_BUF_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -160,7 +233,7 @@ esp_err_t net_start(void)
     s_inbox = xQueueCreate(INBOX_QUEUE_DEPTH, sizeof(inbox_item_t));
     if (!s_inbox) return ESP_ERR_NO_MEM;
 
-    BaseType_t ok = xTaskCreate(net_worker, "net_worker", 6144, NULL, 5, &s_worker);
+    BaseType_t ok = xTaskCreate(net_worker, "net_worker", 8192, NULL, 5, &s_worker);
     if (ok != pdPASS) return ESP_ERR_NO_MEM;
 
     return ESP_OK;

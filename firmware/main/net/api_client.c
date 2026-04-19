@@ -113,8 +113,14 @@ esp_err_t api_register(void)
 
 /* ── Fetch config ───────────────────────────────────────────────────── */
 
-esp_err_t api_fetch_config(void)
+esp_err_t api_fetch_config(char *body, size_t cap, size_t *out_len)
 {
+    if (!body || cap == 0 || !out_len) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_len = 0;
+    body[0] = '\0';
+
     const bullerby_identity_t *id = identity_get();
     char url[URL_MAX];
     int n = snprintf(url, sizeof(url), "%s/api/devices/%s/config",
@@ -123,10 +129,7 @@ esp_err_t api_fetch_config(void)
         return ESP_ERR_INVALID_ARG;
     }
 
-    /* 2 KB is plenty for the small config JSON we emit today. */
-    static char body_buf[2048];
-    body_buf[0] = '\0';
-    body_sink_t sink = {.buf = body_buf, .cap = sizeof(body_buf)};
+    body_sink_t sink = {.buf = body, .cap = cap};
 
     esp_http_client_config_t cfg = {
         .url = url,
@@ -150,21 +153,12 @@ esp_err_t api_fetch_config(void)
         return err;
     }
     if (status != 200) {
-        ESP_LOGE(TAG, "config status %d: %s", status, sink.buf);
+        ESP_LOGE(TAG, "config status %d: %s", status, body);
         return ESP_FAIL;
     }
 
-    cJSON *root = cJSON_Parse(sink.buf);
-    if (!root) {
-        ESP_LOGW(TAG, "config body is not JSON (%u bytes)", (unsigned)sink.len);
-        return ESP_OK;
-    }
-    const cJSON *fams = cJSON_GetObjectItemCaseSensitive(root, "families");
-    int count = cJSON_IsArray(fams) ? cJSON_GetArraySize(fams) : 0;
-    const cJSON *fam_id = cJSON_GetObjectItemCaseSensitive(root, "family_id");
-    ESP_LOGI(TAG, "config ok: family=%s families=%d",
-             cJSON_IsString(fam_id) ? fam_id->valuestring : "?", count);
-    cJSON_Delete(root);
+    *out_len = sink.len;
+    ESP_LOGI(TAG, "config ok (%u bytes JSON)", (unsigned)sink.len);
     return ESP_OK;
 }
 
