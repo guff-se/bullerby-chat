@@ -71,15 +71,17 @@ esp_err_t hal_touch_init(lv_display_t *disp);
  */
 uint8_t hal_touch_consume_gesture(void);
 
-/** Initialise ES8311 codec (I2C + I2S). */
+/** Initialise ES8311 codec (I2C + I2S) via Espressif's esp_codec_dev. */
 esp_err_t hal_codec_init(void);
-
-/** Idempotent enable/disable of the I2S TX/RX channels (tracks state to avoid duplicate calls). */
-esp_err_t hal_codec_tx_enable(bool on);
-esp_err_t hal_codec_rx_enable(bool on);
 
 /** Enable / disable the speaker amplifier. */
 void hal_pa_enable(bool on);
+
+/**
+ * Latch POWER_HOLD_PIN high via RTC GPIO so boards with a soft-power push-button
+ * stay on after release. No-op on boards without the latch (pin is unused elsewhere).
+ */
+esp_err_t hal_power_init(void);
 
 /** Initialise status LED GPIO. */
 esp_err_t hal_led_init(void);

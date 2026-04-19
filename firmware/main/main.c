@@ -42,48 +42,11 @@ extern i2s_chan_handle_t hal_codec_get_rx(void);
 
 /**
  * One I2S STD stereo DMA frame from the codec driver (`hal/codec.c`: dma_frame_num = 240).
- * Duplex ESP32-S3 I2S often needs TX running (fed with silence) for RX to see bit clock/data.
+ * esp_codec_dev keeps both channels running for the lifetime of the app; TX clocks silence
+ * when we aren't writing, so no manual priming is needed any more.
  */
 #define CODEC_I2S_DMA_FRAMES   240
 #define CODEC_I2S_CHUNK_BYTES  (CODEC_I2S_DMA_FRAMES * sizeof(int16_t) * 2)
-
-/** Zero silence fed to TX during mic capture (BSS). */
-static int16_t s_i2s_tx_silence[CODEC_I2S_DMA_FRAMES * 2];
-
-static void i2s_duplex_tx_silence_tick(i2s_chan_handle_t tx)
-{
-    if (!tx) {
-        return;
-    }
-    size_t written = 0;
-    (void)i2s_channel_write(tx, s_i2s_tx_silence, sizeof(s_i2s_tx_silence), &written, pdMS_TO_TICKS(50));
-}
-
-static esp_err_t i2s_duplex_mic_start(i2s_chan_handle_t tx, i2s_chan_handle_t rx)
-{
-    hal_pa_enable(false);
-    esp_err_t err = hal_codec_tx_enable(true);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "I2S TX enable failed: %s", esp_err_to_name(err));
-    }
-    err = hal_codec_rx_enable(true);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "I2S RX enable failed: %s", esp_err_to_name(err));
-        hal_codec_tx_enable(false);
-        return err;
-    }
-    /* Prime TX FIFO so the link runs before first RX read. */
-    i2s_duplex_tx_silence_tick(tx);
-    return ESP_OK;
-}
-
-static void i2s_duplex_mic_stop(i2s_chan_handle_t tx, i2s_chan_handle_t rx)
-{
-    (void)tx;
-    (void)rx;
-    hal_codec_rx_enable(false);
-    hal_codec_tx_enable(false);
-}
 
 /* ── Audio shared state ─────────────────────────────────────────────── */
 
@@ -134,12 +97,12 @@ static void play_mono_pcm(const int16_t *mono, size_t mono_bytes, int sample_rat
     i2s_chan_handle_t tx = hal_codec_get_tx();
     if (!tx) return;
 
-    hal_codec_tx_enable(false);
-
     /* Held in BSS — play_mono_pcm runs serialised behind s_audio_lock, so sharing is safe. */
     static int16_t stereo_chunk[480 * 2];
 
-    /* Retune TX clock if needed, then restore to mic rate on the way out. */
+    /* Retune I2S TX clock for off-rate remote playback, then restore. The ES8311 itself
+     * is locked at AUDIO_SAMPLE_RATE; if sender rate differs, audio will play at the
+     * wrong pitch unless esp_codec_dev is reopened. Good enough for now. */
     bool retuned = (sample_rate > 0 && sample_rate != AUDIO_SAMPLE_RATE);
     if (retuned) {
         i2s_std_clk_config_t clk = I2S_STD_CLK_DEFAULT_CONFIG(sample_rate);
@@ -152,7 +115,6 @@ static void play_mono_pcm(const int16_t *mono, size_t mono_bytes, int sample_rat
     }
 
     hal_pa_enable(true);
-    hal_codec_tx_enable(true);
 
     size_t frames = mono_bytes / sizeof(int16_t);
     size_t done = 0;
@@ -168,7 +130,6 @@ static void play_mono_pcm(const int16_t *mono, size_t mono_bytes, int sample_rat
         done += chunk;
     }
 
-    hal_codec_tx_enable(false);
     hal_pa_enable(false);
 
     if (retuned) {
@@ -276,33 +237,26 @@ static void audio_task(void *arg)
     gpio_config(&btn_cfg);
 
     i2s_chan_handle_t rx = hal_codec_get_rx();
-    i2s_chan_handle_t tx = hal_codec_get_tx();
 
+    /* Mic path: I2S channels are enabled permanently by hal_codec_init. We just gate
+     * the PA (via hal_pa_enable) around playback, and keep reading from RX DMA while
+     * the UI/BOOT button says to capture. */
     for (;;) {
-        /* UI-driven capture (touch Record on family screen) */
         if (atomic_load_explicit(&s_ui_mic_recording, memory_order_acquire)) {
             audio_lock();
             ESP_LOGI(TAG, "[UI] microphone capture started (stop button or timeout ends session)");
             hal_led_set(true);
-            if (i2s_duplex_mic_start(tx, rx) != ESP_OK) {
-                hal_led_set(false);
-                audio_unlock();
-                vTaskDelay(pdMS_TO_TICKS(200));
-                continue;
-            }
+            hal_pa_enable(false);
             size_t cap_bytes = 0;
             bool logged_first_rx = false;
             while (atomic_load_explicit(&s_ui_mic_recording, memory_order_relaxed) &&
                    cap_bytes < AUDIO_BUF_BYTES) {
-                i2s_duplex_tx_silence_tick(tx);
                 size_t want = CODEC_I2S_CHUNK_BYTES;
                 if (cap_bytes + want > AUDIO_BUF_BYTES) {
                     want = AUDIO_BUF_BYTES - cap_bytes;
                 }
                 size_t got = 0;
                 esp_err_t r = i2s_channel_read(rx, rx_dma_staging, want, &got, pdMS_TO_TICKS(150));
-                /* Short timeout so we notice stop quickly; first RX DMA may not be ready yet —
-                 * do not abort on timeout. */
                 if (r != ESP_OK && r != ESP_ERR_TIMEOUT) {
                     ESP_LOGW(TAG, "[UI] i2s_channel_read: %s", esp_err_to_name(r));
                     break;
@@ -315,11 +269,7 @@ static void audio_task(void *arg)
                     ESP_LOGI(TAG, "[UI] RX DMA active (first chunk %u bytes)", (unsigned)got);
                     logged_first_rx = true;
                 }
-                if (r == ESP_ERR_TIMEOUT && got == 0) {
-                    continue;
-                }
             }
-            i2s_duplex_mic_stop(tx, rx);
             hal_led_set(false);
             ESP_LOGI(TAG, "[UI] microphone capture ended, raw stereo ring buffer: %u bytes",
                      (unsigned)cap_bytes);
@@ -337,16 +287,10 @@ static void audio_task(void *arg)
         audio_lock();
         ESP_LOGI(TAG, "[BOOT] hold-to-capture started (release button or buffer full to stop)");
         hal_led_set(true);
+        hal_pa_enable(false);
 
-        if (i2s_duplex_mic_start(tx, rx) != ESP_OK) {
-            hal_led_set(false);
-            audio_unlock();
-            vTaskDelay(pdMS_TO_TICKS(200));
-            continue;
-        }
         size_t cap_bytes = 0;
         while (gpio_get_level(PIN_BOOT_BTN) == 0 && cap_bytes < AUDIO_BUF_BYTES) {
-            i2s_duplex_tx_silence_tick(tx);
             size_t want = CODEC_I2S_CHUNK_BYTES;
             if (cap_bytes + want > AUDIO_BUF_BYTES) {
                 want = AUDIO_BUF_BYTES - cap_bytes;
@@ -362,7 +306,6 @@ static void audio_task(void *arg)
             }
             cap_bytes += got;
         }
-        i2s_duplex_mic_stop(tx, rx);
         hal_led_set(false);
         ESP_LOGI(TAG, "[BOOT] capture ended, raw stereo ring buffer: %u bytes", (unsigned)cap_bytes);
         finish_capture_and_play("BOOT", cap_bytes);
@@ -406,6 +349,7 @@ void app_main(void)
     ESP_ERROR_CHECK(model_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
+    hal_power_init();
     hal_led_init();
     hal_led_set(true);
 
