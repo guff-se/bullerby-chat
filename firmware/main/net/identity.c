@@ -83,6 +83,12 @@ esp_err_t identity_init(void)
         s_server_url[--url_len] = '\0';
     }
 
+    if (strstr(s_server_url, "example.workers.dev") != NULL) {
+        ESP_LOGW(TAG, "server_url is the Kconfig placeholder (*.example.workers.dev) — "
+                      "DNS will fail. Set Bullerby Chat → Server base URL to your deployed "
+                      "Worker (e.g. https://<name>.<subdomain>.workers.dev) or NVS bullerby/server_url.");
+    }
+
 #if defined(CONFIG_BULLERBY_DEVICE_ID_FROM_MAC) && CONFIG_BULLERBY_DEVICE_ID_FROM_MAC
     {
         uint8_t mac[6];
