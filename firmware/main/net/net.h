@@ -38,3 +38,9 @@ esp_err_t net_send_pcm(const char *to_family_server_id,
 
 /** True once the WebSocket is open (ready to receive `new_message`). */
 bool net_is_online(void);
+
+/**
+ * True when the home intercom UI may run: server `GET …/config` was applied and the
+ * WebSocket is connected. When false, the UI shows disconnected (no dummy ring).
+ */
+bool net_intercom_ui_ready(void);

@@ -24,6 +24,9 @@
 #include "family_emoji_assets.h"
 #include "model_families.h"
 #include "model_messages.h"
+#if CONFIG_BULLERBY_ENABLE_NET
+#include "net/net.h"
+#endif
 #include "src/themes/default/lv_theme_default.h"
 
 static const char *TAG = "ui_app";
@@ -101,6 +104,12 @@ static size_t    s_ring_n;
 static lv_obj_t *s_msg_bubble;
 static lv_obj_t *s_msg_icon_lbl;
 static lv_obj_t *s_msg_count_lbl;
+
+#if CONFIG_BULLERBY_ENABLE_NET
+/** Last value applied by `apply_home_intercom_visual_state` (LVGL thread only). */
+static bool s_last_intercom_ready_applied;
+static lv_obj_t *s_disconnect_lbl;
+#endif
 
 /* Record screen */
 static lv_obj_t *s_rec_title_lbl;
@@ -487,6 +496,8 @@ static void on_back_tapped(lv_event_t *e)
 
 /* ── Tick ───────────────────────────────────────────────────────── */
 
+static void apply_home_intercom_visual_state(bool ready);
+
 static void app_tick_cb(lv_timer_t *t)
 {
     (void)t;
@@ -530,6 +541,15 @@ static void app_tick_cb(lv_timer_t *t)
             s_idle_ticks = 0;
         }
     }
+
+#if CONFIG_BULLERBY_ENABLE_NET
+    {
+        bool now = net_intercom_ui_ready();
+        if (now != s_last_intercom_ready_applied) {
+            apply_home_intercom_visual_state(now);
+        }
+    }
+#endif
 
     lvgl_port_unlock();
 }
@@ -631,6 +651,65 @@ static void home_ring_build_on_screen(lv_obj_t *scr)
     }
 }
 
+#if CONFIG_BULLERBY_ENABLE_NET
+static bool intercom_home_visual_ready(void)
+{
+    return net_intercom_ui_ready();
+}
+#else
+static bool intercom_home_visual_ready(void)
+{
+    return true;
+}
+#endif
+
+/**
+ * LVGL thread only, with `lvgl_port_lock` held by caller.
+ * When networking is on and the relay is not ready, show "Frånkopplad" and no ring/bubble.
+ */
+static void apply_home_intercom_visual_state(bool ready)
+{
+    if (!s_scr_home) {
+        return;
+    }
+
+    if (!ready) {
+        home_ring_destroy();
+        if (s_msg_bubble) {
+            lv_anim_del(s_msg_bubble, bubble_glow_exec);
+            lv_obj_add_flag(s_msg_bubble, LV_OBJ_FLAG_HIDDEN);
+        }
+#if CONFIG_BULLERBY_ENABLE_NET
+        if (s_disconnect_lbl) {
+            lv_label_set_text(s_disconnect_lbl, "Frånkopplad");
+            lv_obj_clear_flag(s_disconnect_lbl, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(s_disconnect_lbl);
+        }
+        s_last_intercom_ready_applied = false;
+#endif
+    } else {
+#if CONFIG_BULLERBY_ENABLE_NET
+        if (s_disconnect_lbl) {
+            lv_obj_add_flag(s_disconnect_lbl, LV_OBJ_FLAG_HIDDEN);
+        }
+#endif
+        home_ring_destroy();
+        home_ring_build_on_screen(s_scr_home);
+        if (s_msg_bubble) {
+            s_new_msg_count = model_inbox_unread_count();
+            update_msg_state();
+            refresh_msg_bubble();
+            if (s_msg_state != MSG_NONE) {
+                start_bubble_pulse(s_msg_bubble);
+            }
+            lv_obj_move_foreground(s_msg_bubble);
+        }
+#if CONFIG_BULLERBY_ENABLE_NET
+        s_last_intercom_ready_applied = true;
+#endif
+    }
+}
+
 void ui_app_rebuild_home_ring(void)
 {
     if (!s_scr_home) {
@@ -640,11 +719,7 @@ void ui_app_rebuild_home_ring(void)
         ESP_LOGW(TAG, "rebuild ring: lvgl lock timeout");
         return;
     }
-    home_ring_destroy();
-    home_ring_build_on_screen(s_scr_home);
-    if (s_msg_bubble) {
-        lv_obj_move_foreground(s_msg_bubble);
-    }
+    apply_home_intercom_visual_state(intercom_home_visual_ready());
     lvgl_port_unlock();
 }
 
@@ -652,8 +727,6 @@ static void build_home(void)
 {
     s_scr_home = lv_obj_create(NULL);
     style_base_screen(s_scr_home);
-
-    home_ring_build_on_screen(s_scr_home);
 
     /* Center message bubble */
     s_msg_bubble = lv_button_create(s_scr_home);
@@ -693,15 +766,22 @@ static void build_home(void)
     lv_obj_clear_flag(s_msg_count_lbl, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_align(s_msg_count_lbl, LV_ALIGN_CENTER, 0, 14);
 
-    /* Initialise from model */
-    s_new_msg_count = model_inbox_unread_count();
-    update_msg_state();
-    refresh_msg_bubble();
-    if (s_msg_state != MSG_NONE) {
-        start_bubble_pulse(s_msg_bubble);
-    }
+#if CONFIG_BULLERBY_ENABLE_NET
+    s_disconnect_lbl = lv_label_create(s_scr_home);
+    lv_label_set_text(s_disconnect_lbl, "Frånkopplad");
+    lv_obj_set_style_text_color(s_disconnect_lbl, lv_color_hex(0xffffff), 0);
+    lv_obj_set_style_text_font(s_disconnect_lbl, &lv_font_montserrat_20_latin1, 0);
+    lv_obj_set_style_bg_opa(s_disconnect_lbl, LV_OPA_TRANSP, 0);
+    lv_label_set_long_mode(s_disconnect_lbl, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(s_disconnect_lbl, LCD_H_RES - 32);
+    lv_obj_set_style_text_align(s_disconnect_lbl, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(s_disconnect_lbl, LV_ALIGN_CENTER, 0, 0);
+    no_scroll(s_disconnect_lbl);
+    lv_obj_clear_flag(s_disconnect_lbl, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(s_disconnect_lbl, LV_OBJ_FLAG_HIDDEN);
+#endif
 
-    lv_obj_move_foreground(s_msg_bubble);
+    apply_home_intercom_visual_state(intercom_home_visual_ready());
 }
 
 static void build_record(void)
@@ -814,6 +894,13 @@ void ui_app_on_new_message(const char *from_label)
         ESP_LOGW(TAG, "on_new_message: lvgl lock timeout — bubble stale");
         return;
     }
+
+#if CONFIG_BULLERBY_ENABLE_NET
+    if (!net_intercom_ui_ready()) {
+        lvgl_port_unlock();
+        return;
+    }
+#endif
 
     s_new_msg_count++;
     s_has_played   = false;

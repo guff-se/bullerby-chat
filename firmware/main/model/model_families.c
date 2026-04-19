@@ -22,7 +22,7 @@ typedef struct {
     char sid_storage[48];
 } family_dyn_t;
 
-uint8_t model_my_family_id = 8;
+uint8_t model_my_family_id = 0;
 
 static const family_t k_families_static[] = {
     {1, "ANSUND",     false, "family-a"},
@@ -70,11 +70,10 @@ esp_err_t model_init(void)
     const uint8_t default_id = (uint8_t)CONFIG_BULLERBY_DEFAULT_FAMILY_ID;
     uint8_t id = default_id;
 
-#if CONFIG_BULLERBY_ENABLE_NET && defined(CONFIG_BULLERBY_DEVICE_ID_FROM_MAC) && CONFIG_BULLERBY_DEVICE_ID_FROM_MAC
-    /* NVS `family_id` is often stale (e.g. old sdkconfig default 8 / TADAA) while the device
-     * id is now MAC-based and authoritative on the server. Skip NVS until GET …/config runs. */
-    model_my_family_id = default_id;
-    ESP_LOGI(TAG, "family id %u from Kconfig until server config (MAC identity)", (unsigned)model_my_family_id);
+#if CONFIG_BULLERBY_ENABLE_NET
+    /* No static dummy ring: `GET …/config` supplies families and `model_my_family_id`. */
+    model_my_family_id = 0;
+    ESP_LOGI(TAG, "family list pending server config (no NVS bootstrap when networking on)");
     return ESP_OK;
 #endif
 
@@ -145,6 +144,11 @@ esp_err_t model_set_my_family_id(uint8_t id)
 
 size_t model_family_count(void)
 {
+#if CONFIG_BULLERBY_ENABLE_NET
+    if (!s_dyn) {
+        return 0;
+    }
+#endif
     if (s_dyn) {
         return s_dyn_count;
     }
@@ -153,6 +157,11 @@ size_t model_family_count(void)
 
 const family_t *model_family_by_index(size_t index)
 {
+#if CONFIG_BULLERBY_ENABLE_NET
+    if (!s_dyn) {
+        return NULL;
+    }
+#endif
     if (s_dyn) {
         if (index >= s_dyn_count) {
             return NULL;

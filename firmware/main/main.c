@@ -196,7 +196,7 @@ static void finish_capture_and_play(const char *ctx, size_t cap_stereo_bytes)
     }
 
 #if CONFIG_BULLERBY_ENABLE_NET
-    if (mono_bytes > 0 && net_is_online()) {
+    if (mono_bytes > 0 && net_intercom_ui_ready()) {
         size_t up_bytes = mono_bytes > UPLOAD_CAP_BYTES ? UPLOAD_CAP_BYTES : mono_bytes;
         if (up_bytes < mono_bytes) {
             ESP_LOGW(TAG, "[%s] clipping upload to %u bytes (server 128 KiB cap)",

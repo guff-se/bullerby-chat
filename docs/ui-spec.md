@@ -190,6 +190,10 @@ Family neon palette (cycled by `(id−1) mod 8`):
   recomputes positions automatically for any `n ≤ MAX_FAMILY_CIRCLES (16)`.
 - **Inbox screen removed.** `ui/ui.c` helper functions (`ui_set_status`,
   `ui_show_recording`, `ui_show_playback`) are legacy stubs — not called by v2 UI.
+- **Networking build:** With `CONFIG_BULLERBY_ENABLE_NET=y`, the home ring and
+  message bubble stay hidden until `net_intercom_ui_ready()` (server config
+  applied and WebSocket up). Until then the home screen shows **Frånkopplad**
+  (centred). Builds with networking off keep the static dummy ring as before.
 
 ---
 

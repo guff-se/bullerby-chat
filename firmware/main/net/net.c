@@ -44,6 +44,8 @@ static QueueHandle_t  s_inbox;
 static TaskHandle_t   s_worker;
 static uint8_t       *s_dl_buf;
 static volatile bool  s_online;
+/** True after `model_apply_server_config_json()` succeeds at least once this boot. */
+static volatile bool  s_server_config_ok;
 static net_play_cb_t  s_play_cb;
 
 static void on_new_message(const ws_incoming_message_t *msg)
@@ -92,7 +94,7 @@ static void net_worker(void *arg)
         }
         esp_err_t aerr = model_apply_server_config_json(cfg_body);
         if (aerr != ESP_OK) {
-            ESP_LOGE(TAG, "config JSON apply failed: %s (attempt %d/5) — keeping pre-net family id",
+            ESP_LOGE(TAG, "config JSON apply failed: %s (attempt %d/5)",
                      esp_err_to_name(aerr), i + 1);
             vTaskDelay(pdMS_TO_TICKS(2000));
             continue;
@@ -100,12 +102,13 @@ static void net_worker(void *arg)
 #if CONFIG_BULLERBY_ENABLE_NET
         ui_app_rebuild_home_ring();
 #endif
-        config_applied = true;
+        s_server_config_ok = true;
+        config_applied     = true;
         break;
     }
     if (!config_applied) {
-        ESP_LOGE(TAG, "server config never applied after 5 tries — check Worker deploy vs "
-                      "bullerby.json, serial logs above, and NVS family_id if UI shows wrong home");
+        ESP_LOGE(TAG, "server config never applied after 5 tries — UI stays disconnected until "
+                      "GET …/config succeeds (deploy bullerby.json, WiFi, device id)");
     }
 
     /* 4) Open WebSocket. */
@@ -153,6 +156,15 @@ void net_set_playback_cb(net_play_cb_t cb)
 bool net_is_online(void)
 {
     return s_online;
+}
+
+bool net_intercom_ui_ready(void)
+{
+#if !CONFIG_BULLERBY_ENABLE_NET
+    return true;
+#else
+    return s_server_config_ok && s_online;
+#endif
 }
 
 /** NVS `bullerby` keys first; else Kconfig when SSID non-empty. */
@@ -256,8 +268,8 @@ esp_err_t net_send_pcm(const char *to_family_server_id,
                        const uint8_t *pcm, size_t pcm_len,
                        int sample_rate_hz, float duration_s)
 {
-    if (!s_online) {
-        ESP_LOGW(TAG, "not online — skipping upload");
+    if (!s_server_config_ok || !s_online) {
+        ESP_LOGW(TAG, "intercom not ready — skipping upload");
         return ESP_ERR_INVALID_STATE;
     }
     return api_post_message(to_family_server_id, pcm, pcm_len, sample_rate_hz, duration_s);
