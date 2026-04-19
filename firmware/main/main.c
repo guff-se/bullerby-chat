@@ -8,6 +8,7 @@
  */
 
 #include <stdatomic.h>
+#include <string.h>
 
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
@@ -38,6 +39,58 @@ static const char *TAG = "main";
 
 extern i2s_chan_handle_t hal_codec_get_tx(void);
 extern i2s_chan_handle_t hal_codec_get_rx(void);
+
+/**
+ * One I2S STD stereo DMA frame from the codec driver (`hal/codec.c`: dma_frame_num = 240).
+ * Duplex ESP32-S3 I2S often needs TX running (fed with silence) for RX to see bit clock/data.
+ */
+#define CODEC_I2S_DMA_FRAMES   240
+#define CODEC_I2S_CHUNK_BYTES  (CODEC_I2S_DMA_FRAMES * sizeof(int16_t) * 2)
+
+/** Zero silence fed to TX during mic capture (BSS). */
+static int16_t s_i2s_tx_silence[CODEC_I2S_DMA_FRAMES * 2];
+
+static void i2s_duplex_tx_silence_tick(i2s_chan_handle_t tx)
+{
+    if (!tx) {
+        return;
+    }
+    size_t written = 0;
+    (void)i2s_channel_write(tx, s_i2s_tx_silence, sizeof(s_i2s_tx_silence), &written, pdMS_TO_TICKS(50));
+}
+
+static esp_err_t i2s_duplex_mic_start(i2s_chan_handle_t tx, i2s_chan_handle_t rx)
+{
+    hal_pa_enable(false);
+    esp_err_t err = ESP_OK;
+    if (tx) {
+        err = i2s_channel_enable(tx);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "I2S TX enable failed: %s", esp_err_to_name(err));
+        }
+    }
+    err = i2s_channel_enable(rx);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "I2S RX enable failed: %s", esp_err_to_name(err));
+        if (tx) {
+            i2s_channel_disable(tx);
+        }
+        return err;
+    }
+    /* Prime TX FIFO so the link runs before first RX read. */
+    i2s_duplex_tx_silence_tick(tx);
+    return ESP_OK;
+}
+
+static void i2s_duplex_mic_stop(i2s_chan_handle_t tx, i2s_chan_handle_t rx)
+{
+    if (rx) {
+        i2s_channel_disable(rx);
+    }
+    if (tx) {
+        i2s_channel_disable(tx);
+    }
+}
 
 /* ── Audio shared state ─────────────────────────────────────────────── */
 
@@ -202,8 +255,20 @@ static void audio_task(void *arg)
 
     s_cap_buf = heap_caps_malloc(AUDIO_BUF_BYTES, MALLOC_CAP_SPIRAM);
     s_mono_buf = heap_caps_malloc(AUDIO_BUF_BYTES / 2, MALLOC_CAP_SPIRAM);
-    if (!s_cap_buf || !s_mono_buf) {
-        ESP_LOGE(TAG, "failed to allocate audio buffers in PSRAM");
+    uint8_t *rx_dma_staging =
+        heap_caps_malloc(CODEC_I2S_CHUNK_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    if (!s_cap_buf || !s_mono_buf || !rx_dma_staging) {
+        ESP_LOGE(TAG, "failed to allocate audio buffers (PSRAM and/or %u B internal DMA staging)",
+                 CODEC_I2S_CHUNK_BYTES);
+        if (rx_dma_staging) {
+            heap_caps_free(rx_dma_staging);
+        }
+        if (s_mono_buf) {
+            heap_caps_free(s_mono_buf);
+        }
+        if (s_cap_buf) {
+            heap_caps_free(s_cap_buf);
+        }
         vTaskDelete(NULL);
         return;
     }
@@ -216,6 +281,7 @@ static void audio_task(void *arg)
     gpio_config(&btn_cfg);
 
     i2s_chan_handle_t rx = hal_codec_get_rx();
+    i2s_chan_handle_t tx = hal_codec_get_tx();
 
     for (;;) {
         /* UI-driven capture (touch Record on family screen) */
@@ -223,25 +289,42 @@ static void audio_task(void *arg)
             audio_lock();
             ESP_LOGI(TAG, "[UI] microphone capture started (stop button or timeout ends session)");
             hal_led_set(true);
-            i2s_channel_enable(rx);
+            if (i2s_duplex_mic_start(tx, rx) != ESP_OK) {
+                hal_led_set(false);
+                audio_unlock();
+                vTaskDelay(pdMS_TO_TICKS(200));
+                continue;
+            }
             size_t cap_bytes = 0;
+            bool logged_first_rx = false;
             while (atomic_load_explicit(&s_ui_mic_recording, memory_order_relaxed) &&
                    cap_bytes < AUDIO_BUF_BYTES) {
+                i2s_duplex_tx_silence_tick(tx);
+                size_t want = CODEC_I2S_CHUNK_BYTES;
+                if (cap_bytes + want > AUDIO_BUF_BYTES) {
+                    want = AUDIO_BUF_BYTES - cap_bytes;
+                }
                 size_t got = 0;
-                esp_err_t r = i2s_channel_read(rx, (uint8_t *)s_cap_buf + cap_bytes,
-                                               1024, &got, pdMS_TO_TICKS(150));
+                esp_err_t r = i2s_channel_read(rx, rx_dma_staging, want, &got, pdMS_TO_TICKS(150));
                 /* Short timeout so we notice stop quickly; first RX DMA may not be ready yet —
-                 * BOOT path uses portMAX_DELAY and never sees this. Do not abort on timeout. */
+                 * do not abort on timeout. */
                 if (r != ESP_OK && r != ESP_ERR_TIMEOUT) {
                     ESP_LOGW(TAG, "[UI] i2s_channel_read: %s", esp_err_to_name(r));
                     break;
                 }
+                if (got > 0) {
+                    memcpy((uint8_t *)s_cap_buf + cap_bytes, rx_dma_staging, got);
+                }
                 cap_bytes += got;
+                if (got > 0 && !logged_first_rx) {
+                    ESP_LOGI(TAG, "[UI] RX DMA active (first chunk %u bytes)", (unsigned)got);
+                    logged_first_rx = true;
+                }
                 if (r == ESP_ERR_TIMEOUT && got == 0) {
                     continue;
                 }
             }
-            i2s_channel_disable(rx);
+            i2s_duplex_mic_stop(tx, rx);
             hal_led_set(false);
             ESP_LOGI(TAG, "[UI] microphone capture ended, raw stereo ring buffer: %u bytes",
                      (unsigned)cap_bytes);
@@ -260,19 +343,31 @@ static void audio_task(void *arg)
         ESP_LOGI(TAG, "[BOOT] hold-to-capture started (release button or buffer full to stop)");
         hal_led_set(true);
 
-        i2s_channel_enable(rx);
+        if (i2s_duplex_mic_start(tx, rx) != ESP_OK) {
+            hal_led_set(false);
+            audio_unlock();
+            vTaskDelay(pdMS_TO_TICKS(200));
+            continue;
+        }
         size_t cap_bytes = 0;
         while (gpio_get_level(PIN_BOOT_BTN) == 0 && cap_bytes < AUDIO_BUF_BYTES) {
+            i2s_duplex_tx_silence_tick(tx);
+            size_t want = CODEC_I2S_CHUNK_BYTES;
+            if (cap_bytes + want > AUDIO_BUF_BYTES) {
+                want = AUDIO_BUF_BYTES - cap_bytes;
+            }
             size_t got = 0;
-            esp_err_t r = i2s_channel_read(rx, (uint8_t *)s_cap_buf + cap_bytes,
-                                           1024, &got, portMAX_DELAY);
+            esp_err_t r = i2s_channel_read(rx, rx_dma_staging, want, &got, portMAX_DELAY);
             if (r != ESP_OK) {
                 ESP_LOGW(TAG, "[BOOT] i2s_channel_read: %s", esp_err_to_name(r));
                 break;
             }
+            if (got > 0) {
+                memcpy((uint8_t *)s_cap_buf + cap_bytes, rx_dma_staging, got);
+            }
             cap_bytes += got;
         }
-        i2s_channel_disable(rx);
+        i2s_duplex_mic_stop(tx, rx);
         hal_led_set(false);
         ESP_LOGI(TAG, "[BOOT] capture ended, raw stereo ring buffer: %u bytes", (unsigned)cap_bytes);
         finish_capture_and_play("BOOT", cap_bytes);
