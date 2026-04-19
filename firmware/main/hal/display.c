@@ -106,14 +106,14 @@ esp_err_t hal_display_init(lv_display_t **disp_out)
                            0x18, 0x13, 0x71, 0xF3, 0x70, 0x70};
     esp_lcd_panel_io_tx_param(io_handle, 0x63, data_0x63, sizeof(data_0x63));
 
-    uint8_t data_0x36[] = {0x48};
-    esp_lcd_panel_io_tx_param(io_handle, 0x36, data_0x36, sizeof(data_0x36));
-
     uint8_t data_0xC3[] = {0x1F};
     esp_lcd_panel_io_tx_param(io_handle, 0xC3, data_0xC3, sizeof(data_0xC3));
 
     uint8_t data_0xC4[] = {0x1F};
     esp_lcd_panel_io_tx_param(io_handle, 0xC4, data_0xC4, sizeof(data_0xC4));
+
+    /* Horizontal orientation: use esp_lcd_panel_mirror only (updates gc9a01 madctl_val + sends MADCTL). Raw 0x36 bypasses driver state. */
+    ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_handle, true, false));
 
     const lvgl_port_cfg_t lvgl_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     ESP_RETURN_ON_ERROR(lvgl_port_init(&lvgl_cfg), TAG, "LVGL port init failed");
@@ -129,10 +129,10 @@ esp_err_t hal_display_init(lv_display_t **disp_out)
 #if LVGL_VERSION_MAJOR >= 9
         .color_format = LV_COLOR_FORMAT_RGB565,
 #endif
-        /* esp_lcd_panel_mirror() above already applies DISPLAY_MIRROR_*; keep LVGL HW state neutral. */
+        /* Match final esp_lcd_panel_mirror(..., true, false) after vendor init. */
         .rotation = {
             .swap_xy = false,
-            .mirror_x = false,
+            .mirror_x = true,
             .mirror_y = false,
         },
         .flags = {

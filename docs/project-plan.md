@@ -65,18 +65,18 @@ messages, and uses a fixed dummy family list.
 
 **Detailed firmware roadmap:** [firmware-plan.md](firmware-plan.md) (modules, phases, storage, audio, touch/swipe evaluation, testing).
 
-**UI specification (carousel, scale, embedded UX):** [ui-spec.md](ui-spec.md).
+**UI specification (v2 ring layout, touch targets, embedded UX):** [ui-spec.md](ui-spec.md).
+
+**Language:** On-device **user-visible** copy is **Swedish** (see [ui-spec.md](ui-spec.md), Language). Server/API field names and JSON tokens may remain English (e.g. `ALL` / `broadcast` in metadata); the device shows **ALLA** and other Swedish strings in the UI.
 
 ### 2.1 UI (LVGL on 240x240 round LCD)
 
-- **Home screen:** Grid of circular family icons filling the round display
-  - Each icon: a letter or simple pictogram + family name
-  - Last slot: "ALL" icon (broadcast)
-  - Scrollable if >6 families (but targeting ~5-6 families initially)
-  - **Swipe evaluation:** Test hardware-reported swipes (CST816D gesture register) to see if **horizontal swipes** can switch the active family (e.g. carousel); details in [firmware-plan.md](firmware-plan.md).
-- **Recording screen:** Pulsing red circle + timer (0–30s), tap to stop
-- **Inbox indicator:** Badge count on status area + LED blink
-- **Playback screen:** Speaker icon + progress bar, auto-returns to home
+Canonical layout: **[ui-spec.md](ui-spec.md) v2 (ring)** — implemented in firmware today.
+
+- **Home screen:** Ring of **tappable family circles** (neon fill + emoji) around the disc; **ALLA** as broadcast row; **center message bubble** when the dummy inbox has items (play / count / replay affordance)
+- **Recording screen:** Family colour flood, **name in top bar**, large record/stop control, back; after send, **random Swedish toast** then return home
+- **Inbox:** Count and entry via **center bubble** on home; **dedicated inbox list screen** still roadmap (playback UX)
+- **Optional later:** CST816D **gesture** evaluation for swipe-between-families pager — [firmware-plan.md](firmware-plan.md)
 
 ### 2.2 Audio Pipeline
 
@@ -97,9 +97,9 @@ recorded clips during development).
 - **Protocol:** WebSocket to **`GET /api/ws`** (same `Authorization` + `X-Device-Id` as HTTP)
   - JSON `{ "type": "heartbeat" }` / `{ "type": "heartbeat_ack" }` (firmware may still use ~30s cadence for UX)
   - Auto-reconnect with exponential backoff
-- **Message upload:** `POST /api/messages` — `multipart/form-data`: field **`audio`** (file), **`metadata`** (JSON string: `to_family_id`, `duration_s`; omit or `"ALL"`/`broadcast` for broadcast)
+- **Message upload:** `POST /api/messages` — `multipart/form-data`: field **`audio`** (file), **`metadata`** (JSON string: `to_family_id`, `duration_s`, **`sample_rate_hz`** — defaults to `16000` if omitted; omit or `"ALL"`/`broadcast` for broadcast)
 - **Message download:** `GET` the **`download_url`** from the `new_message` WebSocket event — signed query **`exp`** + **`sig`**, **not** a server inbox to poll
-- **Config sync:** On boot, **`GET /api/devices/{id}/config`** (authenticated); same JSON shape as bundled `bullerby.json` families + device assignment
+- **Config sync:** After WiFi, **`GET /api/devices/{id}/config`** (authenticated) returns `family_id`, `families[]` (`id`, `name`, `icon`) — firmware applies this to the in-memory family model and refreshes the home ring (see `model_apply_server_config_json` in `firmware/main/model/model_families.c`). Until then, a static table matches the bundled JSON for offline dev.
 
 ### 2.4 Provisioning (First-Time Setup)
 
@@ -116,7 +116,7 @@ register with server.
   │
   ├─ Tap inbox badge ──► [Playback Screen] ──► Auto-return ──► [Home]
   │
-  └─ Tap "ALL" icon ──► [Recording Screen] ──► Tap again ──► Upload to all ──► [Home]
+  └─ Tap **ALLA** icon ──► [Recording Screen] ──► Tap again ──► Upload to all ──► [Home]
 ```
 
 ---
@@ -156,7 +156,7 @@ There is **no** “list unread messages on server” or “mark read on server�
 - **One persistent connection per device** (12 devices ≈ trivial).
 - Server → device:
   - `connected` — after upgrade
-  - `new_message` — `{ message_id, from_family_id, duration_s, download_url }` — fetch audio before relay TTL
+  - `new_message` — `{ message_id, from_family_id, duration_s, sample_rate_hz, download_url }` — fetch audio before relay TTL; `sample_rate_hz` lets the receiver retune I2S TX
   - **`config_updated`** — *not implemented yet*; devices pick up new config via **`GET .../config`** on reconnect or periodic poll
 - Device → server:
   - `{ "type": "heartbeat" }` → `heartbeat_ack`
@@ -256,15 +256,14 @@ In-flight message (server — ephemeral only)
 **Goal:** A complete on-device experience with no network: looks and feels like the
 final product for families, using placeholder data.
 
-- [ ] **Dummy families:** Static list (names, letters/icons) representing ~5–6
-      families + “ALL”; easy to replace later with server-driven config
-- [ ] **Graphic design & LVGL:** Home grid, typography, colors, icons on round screen
-- [ ] **Touch / swipe:** Log and evaluate **CST816D hardware gesture** codes; if reliable, use **swipes** to move between families (carousel); see [firmware-plan.md](firmware-plan.md)
-- [ ] **Recording flow:** Tap family → recording screen (timer, pulsing indicator) →
-      stop; store PCM/Opus locally or in RAM for demo
-- [ ] **Playback flow:** Inbox UI with fake or locally queued “messages”; tap to play
-      through speaker
-- [ ] **Status:** Battery %, recording state, simple inbox badge (dummy counts)
+**Interface checkpoint (Apr 2026):** **v2 ring** home + recording shell + Swedish copy + emoji assets are **done for now** (see [ui-spec.md](ui-spec.md) status). Next focus: **codec from record UI**, **persistence**, **inbox list / playback** product path — not more layout churn on the current screens.
+
+- [x] **Dummy families:** Static table (names, ids) + **ALLA**; replaceable with server config; device family id in **NVS** (`CONFIG_BULLERBY_DEFAULT_FAMILY_ID` default)
+- [x] **Graphic design & LVGL (v2):** Ring of circles, emoji assets, neon palette, center message bubble, record screen typography and controls per ui-spec
+- [ ] **Touch / swipe (optional):** Log / use **CST816D** gesture codes for a future pager or extras — not required for tap-only ring; see [firmware-plan.md](firmware-plan.md)
+- [x] **Recording screen (UI):** Tap ring → full-screen record/stop, **30 s UI cap**, Swedish send toast → home (**I2S from record button** still Phase D — **BOOT** PCM path today)
+- [ ] **Playback product path:** Opus/PCM through speaker from chosen message; **scrollable inbox list** screen TBD (home bubble + dummy model exercise counts / tap)
+- [x] **Status:** Battery % on home; inbox **count** on center bubble (dummy `model_messages`)
 - [ ] **Optional:** Simulate “new message” with a button or timer to test sounds/LEDs
 
 No HTTP, WebSocket, or provisioning in this phase.
@@ -280,14 +279,21 @@ No HTTP, WebSocket, or provisioning in this phase.
 
 ### Phase 4: Firmware + server integration
 
-- [ ] Replace dummy family list with config from server (or cache + sync)
-- [ ] Opus encode; upload message via HTTP; WebSocket for push
-- [ ] Download and play received messages; real inbox counts
-- [ ] Captive portal WiFi provisioning + server URL in NVS
-- [ ] OTA firmware updates via server
-- [ ] LED feedback (recording, new message, connected/disconnected)
-- [ ] Low battery warning on screen
-- [ ] Edge cases: WiFi dropout, server unreachable, full storage
+**Transport landed Apr 2026** (behind `CONFIG_BULLERBY_ENABLE_NET=y`): WiFi STA, `api_register` + `api_fetch_config`, `wss://…/api/ws` with 30 s heartbeat, multipart upload, signed GET, I2S playback at sender's `sample_rate_hz`. See [firmware-plan.md §Phase G](firmware-plan.md).
+
+- [x] **Server schema aligned** — firmware family table (`ANSUND`…`TADAA`) + `server/config/bullerby.json` now carry matching `server_id`s (`family-a`…`family-h`) and 8 devices (`device-uuid-001`…`008`).
+- [x] **`sample_rate_hz` round-trip** — device uploads mono 24 kHz PCM with the field in `metadata`; server stores + forwards it on `new_message`; receiving device reclocks I2S TX so the played-back audio sounds correct regardless of sender rate.
+- [x] **HTTP + WebSocket client** (`firmware/main/net/`) — HTTPS via `esp_http_client` + mbedTLS cert bundle, WSS via `esp_websocket_client`.
+- [x] **BOOT-hold capture uploads** to the server (broadcast), clipped to the 128 KiB server cap.
+- [x] **Remote audio playback** on the device (worker task + 128 KiB PSRAM download buffer).
+- [x] Replace dummy family list with **server-fetched** `families[]` after a successful `GET …/config` (static table remains the offline / pre-config fallback).
+- [ ] **Route record-screen sends** from UI to `net_send_pcm(family->server_id, …)` instead of broadcast-only (wire up via `model_family_by_server_id`).
+- [ ] Opus encode (today: **raw PCM** at 24 kHz mono — fits the 128 KiB cap for ≤ ~2.7 s clips).
+- [ ] Captive portal WiFi provisioning + server URL in NVS (today: `Kconfig` / NVS pre-seeded).
+- [ ] OTA firmware updates via server.
+- [ ] LED feedback (recording, new message, connected/disconnected) — only `hal_led_set(true)` during capture today.
+- [x] Low battery warning on screen.
+- [ ] Edge cases: WiFi dropout retry UX, server unreachable toast, full storage.
 
 ### Phase 5: Scale to 12 Devices
 

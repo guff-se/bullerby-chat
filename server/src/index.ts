@@ -66,6 +66,10 @@ async function handlePostMessage(
     to_family_id: broadcast ? null : toFamilyId,
     broadcast,
     duration_s: typeof metadata.duration_s === "number" ? metadata.duration_s : 0,
+    sample_rate_hz:
+      typeof metadata.sample_rate_hz === "number" && metadata.sample_rate_hz > 0
+        ? metadata.sample_rate_hz
+        : 16000,
     audio_base64: bytesToBase64(bytes),
     public_origin: origin,
   };

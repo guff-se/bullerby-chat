@@ -27,7 +27,7 @@ After updating the secret in the dashboard, wait a few seconds before calling au
 
 ## Config
 
-Edit **`config/bullerby.json`** (families + one device per family), commit, then `npm run deploy`. Devices see updates on the next `GET /api/devices/{id}/config` or after a WebSocket reconnect (you can add `config_updated` broadcasts later).
+Edit **`config/bullerby.json`** (families + one device per family), commit, then `npm run deploy`. Devices see updates on the next `GET /api/devices/{id}/config` or after a WebSocket reconnect (you can add `config_updated` broadcasts later). Each **`devices[].id`** must match the firmware **`X-Device-Id`** (Kconfig / NVS, or `esp-xxxxxxxxxxxx` when **Bullerby Chat → Derive device id from chip WiFi MAC** is enabled in menuconfig).
 
 ## Testing (required before deploy)
 
@@ -44,6 +44,8 @@ npm run test:watch    # during development
 - **`test/worker.test.ts`** — HTTP integration: `/health`, `/api/devices/.../config`, `/api/devices/register`.
 
 **`npm run deploy`** runs **`npm test` first** (`predeploy`). To deploy without tests (emergency only), use `npx wrangler deploy` directly — do not make that the default workflow.
+
+**Deployed `workers.dev` URL:** Wrangler prints it at the end of `deploy`. It matches **`https://<name>.<subdomain>.workers.dev`** where **`name`** is `wrangler.toml`’s `name` field and **`<subdomain>`** is account-specific (not in git). Confirm with `curl -sI "https://<name>.<subdomain>.workers.dev/health"` (expect `HTTP/2 200`). Firmware **Server base URL** (or NVS `bullerby` / `server_url`) must use that exact origin — no trailing slash. `wrangler deployments list` does not echo the hostname; use the deploy log or `curl` as above.
 
 Test-only secret: **`test/constants.ts`** (injected via `vitest.config.mts`); production uses **`BULLERBY_DEVICE_SECRET`** from Wrangler.
 
@@ -93,13 +95,18 @@ This is a **Node** client check, not firmware; it validates the live Cloudflare 
 
 **Multipart** (`POST /api/messages`):
 
-- `audio` — file field (Opus blob, max ~128 KiB).
-- `metadata` — JSON string, e.g. `{ "to_family_id": "family-b", "duration_s": 5 }` or omit / `"ALL"` / `"broadcast"` for broadcast.
+- `audio` — file field (audio blob, max **128 KiB**). Codec is up to the sender — today firmware uploads **raw 16-bit mono PCM**; swapping in Opus later is transparent to the server.
+- `metadata` — JSON string:
+  - `to_family_id` *(optional)* — omit or `"ALL"` / `"broadcast"` for broadcast.
+  - `duration_s` *(optional)* — float; echoed in `new_message`.
+  - `sample_rate_hz` *(optional)* — integer; defaults to **16000** when missing. Echoed in `new_message` so the receiver can retune its I2S TX clock. Firmware today uploads **24000**.
+
+  Example: `{ "to_family_id": "family-b", "duration_s": 2.5, "sample_rate_hz": 24000 }`.
 
 **WebSocket** (after `connected`):
 
 - Send `{ "type": "heartbeat" }` → `{ "type": "heartbeat_ack", ... }`.
-- Receive `{ "type": "new_message", "message_id", "from_family_id", "duration_s", "download_url" }` — `GET` the URL once (signed, expires with relay TTL).
+- Receive `{ "type": "new_message", "message_id", "from_family_id", "duration_s", "sample_rate_hz", "download_url" }` — `GET` the URL once (signed, expires with relay TTL).
 
 ## Commands
 

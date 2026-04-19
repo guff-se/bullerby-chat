@@ -1,6 +1,8 @@
 idf_component_register(
     SRC_DIRS
         "."
+        "assets"
+        "fonts"
         "hal"
         "audio"
         "net"
@@ -8,6 +10,8 @@ idf_component_register(
         "model"
     INCLUDE_DIRS
         "."
+        "assets"
+        "fonts"
         "hal"
         "audio"
         "net"
@@ -25,4 +29,10 @@ idf_component_register(
         esp_adc
         spi_flash
         app_update
+        esp-tls
+        esp_http_client
+        esp_http_server
+        esp_websocket_client
+        mbedtls
+        json
 )

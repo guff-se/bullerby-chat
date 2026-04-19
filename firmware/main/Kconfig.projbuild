@@ -1,10 +1,70 @@
 menu "Bullerby Chat"
 
-    config BULLERBY_ENABLE_WIFI
-        bool "Enable WiFi skeleton (STA with hardcoded credentials)"
+    config BULLERBY_DEFAULT_FAMILY_ID
+        int "Default family id (first boot only, before NVS has a value)"
+        range 1 255
+        default 8
+        help
+            Written to NVS on first boot if no family_id is stored yet. Per-device
+            assignment uses model_set_my_family_id() or a future provisioning flow;
+            OTA updates keep the value in the nvs partition.
+
+    config BULLERBY_ENABLE_NET
+        bool "Enable networking (WiFi + server HTTP/WS)"
         default n
         help
-            When disabled, the firmware skips WiFi and netif init — recommended for
-            offline UI/audio work (less power use and serial noise).
+            When enabled, the device initialises WiFi, connects to the Bullerby
+            Worker, fetches config, opens a WebSocket for inbound messages, and
+            uploads recordings. Disable for pure offline UI/audio development.
+
+            Requires CONFIG_BULLERBY_WIFI_SSID / PASS / SERVER_URL /
+            DEVICE_ID / DEVICE_SECRET below to be filled in — prefer a local
+            (gitignored) sdkconfig for real credentials.
+
+    config BULLERBY_WIFI_SSID
+        string "WiFi SSID"
+        depends on BULLERBY_ENABLE_NET
+        default ""
+        help
+            NVS bullerby/wifi_ssid (and wifi_pass) is tried first. If NVS has no
+            SSID, this Kconfig value is used when non-empty. If there are still no
+            credentials, or STA cannot get an IP in 45 s, the device opens an open
+            SoftAP (name Bullerby-XXXX) with a captive portal to store credentials
+            in NVS, then reboots.
+
+    config BULLERBY_WIFI_PASS
+        string "WiFi password"
+        depends on BULLERBY_ENABLE_NET
+        default ""
+
+    config BULLERBY_SERVER_URL
+        string "Server base URL (e.g. https://bullerby.example.workers.dev)"
+        depends on BULLERBY_ENABLE_NET
+        default "https://bullerby-chat.example.workers.dev"
+        help
+            No trailing slash. WebSocket scheme is derived by swapping
+            https:// → wss:// and http:// → ws://.
+
+    config BULLERBY_DEVICE_ID
+        string "Device id (matches server/config/bullerby.json devices[].id)"
+        depends on BULLERBY_ENABLE_NET
+        default "device-uuid-001"
+
+    config BULLERBY_DEVICE_ID_FROM_MAC
+        bool "Override device id with esp-<12 hex> from factory WiFi MAC"
+        depends on BULLERBY_ENABLE_NET
+        default n
+        help
+            When enabled, after NVS/Kconfig load the device id string is replaced
+            with esp- plus the six WiFi MAC bytes in hex. Add that exact string as
+            a devices[].id entry in server/config/bullerby.json.
+
+    config BULLERBY_DEVICE_SECRET
+        string "Shared device secret (matches BULLERBY_DEVICE_SECRET on the Worker)"
+        depends on BULLERBY_ENABLE_NET
+        default ""
+        help
+            Do NOT commit real secrets — override via a local untracked
+            sdkconfig or NVS (future provisioning flow).
 
 endmenu

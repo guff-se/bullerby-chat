@@ -3,7 +3,7 @@
 This document is the **detailed roadmap for ESP-IDF firmware** only. High-level product
 and server planning live in [project-plan.md](project-plan.md).
 
-**On-device UI design** (family strip, center scale, touch targets, embedded UX):
+**On-device UI design** (v2 **ring** layout, touch targets, embedded UX):
 [ui-spec.md](ui-spec.md).
 
 **Strategy:** Build the full on-device UX first using **dummy family data** and **no
@@ -30,10 +30,13 @@ rewriting the UI core.
 
 | Path | Role |
 |------|------|
-| `firmware/main/main.c` | `app_main`, skeleton UI, WiFi stub, audio loopback task |
+| `firmware/main/main.c` | `app_main`, audio capture / playback, net wiring |
 | `firmware/main/hal/` | Hardware abstraction: `display.c`, `touch.c`, `codec.c`, LED/battery helpers in `hal.h` |
+| `firmware/main/app/` | LVGL screens + screen manager (`ui_app.c`) |
+| `firmware/main/model/` | Families (+ server id), inbox messages |
+| `firmware/main/net/` | `identity` (NVS/Kconfig), `wifi`, `api_client` (HTTPS), `ws_client` (wss), `net` (orchestrator) — gated by `CONFIG_BULLERBY_ENABLE_NET` |
 | `firmware/main/CMakeLists.txt` | Sources and `REQUIRES` |
-| `firmware/main/idf_component.yml` | LVGL, esp_lvgl_port, esp_lcd_gc9a01, es8311 |
+| `firmware/main/idf_component.yml` | LVGL, esp_lvgl_port, esp_lcd_gc9a01, es8311, esp_websocket_client |
 | `firmware/partitions.csv` | Dual OTA apps + **8 MB `storage` (SPIFFS)** at `0x800000` — use for offline clips/metadata later |
 
 **Direction:** Split `main.c` into modules as complexity grows, e.g. `ui/`, `app/`, `audio/`, `model/` (see §7).
@@ -42,17 +45,19 @@ rewriting the UI core.
 
 ## 3. Current state (baseline)
 
+**UI language:** All **user-visible** strings on the device are **Swedish** (see [ui-spec.md](ui-spec.md), Language). Code identifiers and API tokens may stay English.
+
 Already in place:
 
 - GC9A01 + LVGL 9 + esp_lvgl_port (partial buffers, RGB565 byte swap, rotation)
 - CST816D touch → LVGL pointer device; **hardware gesture** register is **read and logged** on change (not yet driving carousel logic)
 - ES8311 + I2S at 24 kHz; **boot-button** hold → record to PSRAM → release → playback (PCM loopback)
 - Battery % + charging flag on screen; **low-battery** tint below `BATTERY_PCT_LOW_WARN` (15%); status LED
-- WiFi STA optional via **`CONFIG_BULLERBY_ENABLE_WIFI`** (off by default in `sdkconfig.defaults`); skeleton SSID/password when on
-- **Model:** `family_t` + dummy families + `ALL`; **`message_t`** + in-memory **inbox** (`model_messages.c`); `model_my_family_id` stub
-- **UI (`ui_app.c`):** **Home** = **horizontal family strip** (five scaled bubbles, continuous pan via `s_strip_scroll_px`, cyclic wrap) + **status** (battery, inbox); **Inbox** list; **Recording** with **Record/Stop** and **30 s max** UI timer (**real** capture still via **BOOT** until wired). **Family zoom** overlay (focal bubble reparented to **`lv_display_get_layer_sys()`**, home screen hidden while open) — **on-glass behaviour still being validated** (see **ui-spec.md §6.2**).
+- **Networking** (Phase G — landed Apr 2026) behind **`CONFIG_BULLERBY_ENABLE_NET`** (off by default in `sdkconfig.defaults`; may be on in a checked-in `sdkconfig`): WiFi STA from **`CONFIG_BULLERBY_WIFI_SSID/PASS`** when SSID is non-empty, else NVS `bullerby` keys **`wifi_ssid`** / **`wifi_pass`** → `api_register` + `api_fetch_config` → `wss://…/api/ws` with 30 s heartbeat → on `new_message`, signed HTTPS GET → I2S playback at sender's `sample_rate_hz`. BOOT-hold capture also uploads mono PCM via multipart POST when online (clipped to the server's 128 KiB cap). All HTTPS/WSS verified against the **mbedTLS cert bundle** (`esp_crt_bundle_attach`)
+- **Model:** `family_t` + **ALLA** (broadcast); **`message_t`** + in-memory **inbox** (`model_messages.c`); **`model_my_family_id`** from **NVS** then **`GET …/config`** `family_id` via **`model_apply_server_config_json()`** when net is up; static `family-a`…`h` table is the offline fallback; optional **`model_set_my_family_id()`** for provisioning
+- **UI (`ui_app.c`):** **Home** = **ring of family circles** (even angular spacing, emoji inside each) + **status** (battery); **center message bubble** when the dummy inbox has items (tap → model mark-read / state); **Recording** = full-bleed family colour, title bar, **Record/Stop**, back, **random Swedish send toast**, **30 s max** UI timer; **Record/Stop** drives **real** I2S capture on `audio_task` (same pipeline as **BOOT** hold: PCM → loopback + optional upload). No horizontal strip / zoom overlay in current tree — superseded by v2 (see **ui-spec.md** implementation notes).
 
-**Gaps for product UX:** Audio pipeline wired to recording UI; Opus + SPIFFS; **animated snap** / rubber band after swipe; **on-device confirmation** that strip-only pan and zoom match **ui-spec** (scroll/LVGL interaction and verification — **§6.2**); sending screen; playback screen.
+**Gaps for product UX:** Record/stop drives **I2S** from the UI; Opus + SPIFFS; **dedicated inbox list** + decode→speaker playback; optional **LED / sound** on send; optional CST816D **gesture** pager; richer **screen transitions** beyond fade.
 
 ---
 
@@ -86,44 +91,46 @@ Purpose: predictable building blocks for the app layer.
 - [ ] **Touch:** Ensure no long I2C work on LVGL task; keep CST816D read in registered callback (already).
 - [ ] **Swipe / gesture probe:** The CST816D exposes a **gesture** register (see `CST816D_REG_GESTURE` in `touch.c`). Build a small test mode or boot-time logging that prints **hardware-reported gesture codes** when the user swipes (up/down/left/right if supported). Goal: verify whether we get **reliable swipe direction** from the chip vs. having to infer swipes from raw coordinate streams in software. If hardware gestures are stable on this board, we can use **horizontal swipes to move between families** on the home screen (carousel / pager) instead of or in addition to a dense icon grid.
 - [x] **Battery:** Low-battery threshold for UI warning — `BATTERY_PCT_LOW_WARN` (15%) in `hal.h`; home status bar turns red when not charging.
-- [x] **WiFi:** `CONFIG_BULLERBY_ENABLE_WIFI` in `sdkconfig` / `sdkconfig.defaults` to disable WiFi for offline dev.
+- [x] **Networking flag:** `CONFIG_BULLERBY_ENABLE_NET` in `sdkconfig` / `sdkconfig.defaults` disables WiFi + HTTPS + WSS for offline dev.
 
 ### Phase B — App model (dummy data)
 
 Purpose: one place that defines “who are the families” and “what is a message”.
 
-- [x] **Structs:** `family_t` in `model_families.h`; `message_t` in `model_messages.h` (id, from family, label, duration, unread — extend later with timestamp/storage ref).
-- [x] **Dummy table:** families + `ALL` in `model_families.c`; inbox rows in `model_messages.c`.
-- [x] **“Device identity” stub:** `model_my_family_id` — later from NVS/server.
+- [x] **Structs:** `family_t` in `model_families.h` (local `id`, Swedish `name`, `is_broadcast`, **`server_id`** for API round-trips); `message_t` in `model_messages.h` (id, from family, label, duration, unread — extend later with timestamp/storage ref).
+- [x] **Dummy table:** families + ALLA in `model_families.c`; inbox rows in `model_messages.c`. Firmware table is aligned with `server/config/bullerby.json` (8 families; `family-a`…`family-h`).
+- [x] **Device identity:** `model_my_family_id` in NVS namespace `bullerby`, key `family_id`; first boot uses `CONFIG_BULLERBY_DEFAULT_FAMILY_ID`; **`model_set_my_family_id()`** for later provisioning. With **`CONFIG_BULLERBY_ENABLE_NET`**, server config overwrites the local id from `family_id` and re-persists NVS. Optional **`CONFIG_BULLERBY_DEVICE_ID_FROM_MAC`** sets `device_id` to `esp-` + 12 hex WiFi MAC (add matching `devices[].id` in `server/config/bullerby.json`).
 - [ ] **Outbox** demo + optional **SPIFFS** for persisted clips (namespaced paths).
 
 ### Phase C — UI shell and navigation
 
 Purpose: replace the single test screen with a real navigation stack.
 
-- [x] **Screen manager:** `screen_id_t` + `lv_screen_load` in `ui_app.c` (home, recording, inbox).
-- [x] **Global chrome:** Top bar on home (battery, inbox badge); inbox/recording have back affordances.
-- [ ] **Round layout helpers:** Center content; use `lv_obj_set_style_radius` / clip or large arc container so lists stay inside the circle.
-- [ ] **Fonts:** Pick 1–2 embedded fonts (Latin + optional Nordic); avoid huge TTF in flash — use LVGL’s binary fonts or subset.
+- [x] **Screen manager:** `lv_screen_load` / `lv_screen_load_anim` in `ui_app.c` (**home**, **recording**); center bubble on home covers inbox affordance until a list screen exists.
+- [x] **Global chrome:** Battery on home; recording has back; message bubble shows count when non-empty.
+- [x] **Round layout (v2):** Ring math + circular widgets + `no_scroll()` — content kept in the visible disc per ui-spec (no scrollable strip).
+- [x] **Fonts:** **Montserrat 14 + 20** Latin-1 subsets in `firmware/main/fonts/` (headers in `fonts.h`); Nordic extras optional later.
 
 **Screens (offline):**
 
 | Screen | Purpose |
 |--------|---------|
-| **Home** | Horizontal **strip** of family bubbles + ALL; drag to pan; tap focal → zoom → record flow |
-| **Recording** | Large record affordance, elapsed time, tap or second tap to stop, cancel |
-| **Sending (fake)** | Short “Sent!” or progress animation (no network — simulate delay) |
-| **Inbox list** | Scrollable list of dummy/received items; badge count on home |
-| **Playback** | Play/pause or auto-play, progress; optional waveform stub |
+| **Home** | **Ring** of family circles + **ALLA**; tap → record; **center bubble** = inbox entry (dummy model) |
+| **Recording** | Large record/stop, family name bar, back; send toast; fade back to home |
+| **Sending (fake)** | Random Swedish one-liner toast (~3 s) — no network |
+| **Inbox list** | **TODO** — scrollable list; today counts + tap path via **bubble** on home |
+| **Playback** | **TODO** — full play UI; bubble + model hooks are placeholders |
 
-- [ ] **Transitions:** Simple fade or slide (LVGL anim); keep FPS smooth on partial flush.
-- [ ] **Swipe / pan polish:** Strip **pan** and **zoom** are implemented in code; **on-device** alignment with **ui-spec** (whole-column scroll vs strip-only, zoom z-order and stability) is **open** — see **ui-spec.md §6.2**. Optional: hardware **gesture** bytes drive carousel once validated (Phase A).
+- [x] **Transitions:** **Fade** between home ↔ record (`LV_SCR_LOAD_ANIM_FADE_ON`, ~180–200 ms).
+- [ ] **Further UI polish:** Dedicated inbox list + playback chrome; optional **gesture** pager (Phase A); extra anims if FPS budget allows.
+
+**Interface:** Treated **complete for now** (Apr 2026); see [ui-spec.md](ui-spec.md) status line. Audio wiring and inbox list are the next UX-moving work.
 
 ### Phase D — Audio product path (offline)
 
 Purpose: match product requirements while staying disconnected.
 
-- [ ] **Recording from UI:** Start/stop from recording screen drives **real** I2S capture (today: **BOOT** only; UI timer is a stub toward max duration, e.g. 30 s).
+- [x] **Recording from UI:** Start/stop on the record screen toggles **`app_audio_set_ui_recording`** → `main.c` `audio_task` I2S capture (30 s UI cap unchanged). **BOOT** hold remains for quick capture without opening the screen.
 - [ ] **Buffer strategy:** PSRAM ring or fixed buffer; stop cleanly on max time or user stop.
 - [ ] **Opus:** Encode pipeline (ESP-ADF or `libopus` component); store `.opus` blobs on SPIFFS or raw PCM first then convert.
 - [ ] **Playback:** Decode Opus → I2S; enable PA only during play.
@@ -145,11 +152,17 @@ The partition table already has **8 MB SPIFFS** (`storage`).
 - [ ] **Power:** Screen blanking / brightness curve (backlight PWM already in `display.c` path).
 - [ ] **Concurrency:** One audio operation at a time; mutex between UI and `audio_task`.
 
-### Phase G — Networking (later; not blocking offline work)
+### Phase G — Networking (landed, Apr 2026)
 
-- [ ] **NVS config:** WiFi SSID/password, server base URL (`https://…` / `wss://…`), device id, shared secret — **schema only** early.
-- [ ] **WiFi manager:** Connect, reconnect, status for UI indicator.
-- [ ] **HTTP(S) + WebSocket:** Match **`server/README.md`** — `GET /api/devices/{id}/config`, `POST /api/messages` (multipart), `GET /api/ws` + JSON heartbeat / `new_message` + signed `GET .../audio` — behind `#ifdef` or separate task.
+Behind `CONFIG_BULLERBY_ENABLE_NET=y`. All files live under `firmware/main/net/`.
+
+- [x] **Identity:** `net/identity.c` reads NVS namespace `bullerby` keys `device_id` / `device_secret` / `server_url`; falls back to `CONFIG_BULLERBY_DEVICE_ID` / `DEVICE_SECRET` / `SERVER_URL`. Trailing slash on `server_url` stripped.
+- [x] **WiFi manager:** `net/wifi.c` — `wifi_init_driver()` (STA+AP netifs), `wifi_sta_connect()` for first join (45 s timeout), then STA auto-reconnect on drop. **Credential order:** NVS `bullerby` keys `wifi_ssid` / `wifi_pass` first, then non-empty `CONFIG_BULLERBY_WIFI_SSID` / `PASS`. If no credentials or STA times out: open SoftAP **`Bullerby-` + MAC** (`wifi_portal.c`), DHCP captive-portal URI, DNS redirect (`dns_server.c` from ESP-IDF example), HTTP form POST `/save` → NVS → `esp_restart()`. **UI:** `ui_app_show_wifi_setup()` tells the user which SSID to join. `wifi_wait_connected()` in `net_worker` after successful bootstrap.
+- [x] **HTTPS:** `net/api_client.c` — `POST /api/devices/register`, `GET /api/devices/{id}/config` (logged), `POST /api/messages` (multipart/form-data with boundary `----bullerby7f3c2e9a`, mono PCM + `Authorization: Bearer` + `X-Device-Id` headers, metadata JSON with `sample_rate_hz`), `GET <signed_url>` for audio. mbedTLS cert bundle via `esp_crt_bundle_attach`.
+- [x] **WebSocket:** `net/ws_client.c` opens `wss://…/api/ws` via `esp_websocket_client`, 30 s heartbeat, reassembles fragmented text frames into a 4 KiB buffer, parses `new_message` (`message_id`, `from_family_id`, `sample_rate_hz`, `duration_s`, `download_url`), dispatches to a callback.
+- [x] **Orchestrator:** `net/net.c` — worker task drains an inbox queue, downloads audio to a 128 KiB PSRAM buffer, hands it to `main.c` for playback. `net_send_pcm(to_family_server_id, pcm, len, sr, duration)` wraps the upload for the BOOT-hold capture path.
+- [x] **Playback:** `main.c::play_mono_pcm` reclocks I2S TX via `i2s_channel_reconfig_std_clock` when the sender's sample rate ≠ 24 kHz; shared `s_audio_lock` mutex gates capture vs. remote playback.
+- [ ] **Routing from UI:** Tapping a family circle currently only opens the record screen; wiring "record → upload to that family's `server_id`" (via `model_family_by_server_id`) is next.
 - [ ] **OTA:** Second OTA slot already in partition table; add HTTPS OTA when packaging exists.
 
 **Server reference:** Production API is implemented in **`server/`** (see **`docs/project-plan.md` §3**). Before changing server behaviour, run **`cd server && npm test`** (see **`server/README.md`**).
@@ -162,7 +175,7 @@ Authoritative layout and interaction rules: **[ui-spec.md](ui-spec.md)**.
 
 - **Safe area:** Treat center ~220 px diameter as primary; outer ring for subtle chrome only.
 - **Touch targets:** Minimum ~44 px for kids; larger for main actions.
-- **Family grid:** e.g. 2×3 or hex layout; **ALL** visually distinct (color/icon).
+- **Family grid:** e.g. 2×3 or hex layout; **ALLA** visually distinct (color/icon).
 - **Swipe between families (optional):** After validating CST816D-reported swipes (Phase A), consider a **pager** UI: one large family tile per screen, **swipe left/right** to change family, **tap** to record. Reduces clutter on a small round display; confirm gestures do not misfire when kids tap.
 - **Recording:** Clear “recording” state (red dot, timer); block accidental navigation.
 - **Vibe:** Playful, colorful, wacky—see [ui-spec.md](ui-spec.md) (neighborhood kids, not corporate a11y).
@@ -241,12 +254,13 @@ Use **`idf.py menuconfig`** for PSRAM, CPU frequency, and optional WiFi disable.
 ## 12. Checklist summary (offline milestone)
 
 - [x] Dummy families + message model
-- [x] Navigation + home / recording / inbox (dedicated **playback** screen still TODO)
-- [ ] Record/stop from UI + max duration (**codec** — UI timer exists as stub)
+- [x] Navigation + **home / recording** + center **message bubble** (inbox list screen + dedicated **playback** screen still TODO)
+- [x] **v2 ring UI shell** — **interface parked** (Apr 2026); see [ui-spec.md](ui-spec.md)
+- [x] Record/stop from UI + max duration — **codec** path in `main.c` shared with BOOT hold
 - [ ] Opus + SPIFFS persistence (or PCM interim)
 - [ ] Simulated incoming message path
-- [ ] LED + battery warnings
-- [ ] Optional: WiFi stripped from default build for dev
+- [x] **Battery** warning tint on home; **LED** messaging patterns still TODO
+- [x] Networking optional / off by default for dev (`CONFIG_BULLERBY_ENABLE_NET`); full Phase G transport landed
 - [ ] CST816D swipe/gesture evaluation documented; optional pager UX if stable
 
 When this list is done, you are ready to attach **Phase G** networking without changing the fundamental UI flow.
@@ -257,4 +271,4 @@ When this list is done, you are ready to attach **Phase G** networking without c
 
 - [project-plan.md](project-plan.md) — product scope, server API (§3), infrastructure
 - [server/README.md](../server/README.md) — HTTP/WebSocket contract and Wrangler deploy
-- [ui-spec.md](ui-spec.md) — family strip carousel, touch targets, embedded UX
+- [ui-spec.md](ui-spec.md) — v2 ring layout, touch targets, embedded UX

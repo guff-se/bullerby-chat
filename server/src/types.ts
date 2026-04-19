@@ -21,6 +21,11 @@ export interface MessageMetadata {
   to_family_id?: string | null;
   /** Duration in seconds (optional, for UI). */
   duration_s?: number;
+  /**
+   * Sample rate of the audio payload in Hz — forwarded verbatim so the
+   * recipient can play raw PCM at the right clock. Default 16000 if omitted.
+   */
+  sample_rate_hz?: number;
 }
 
 export interface PostMessagePayload {
@@ -29,6 +34,7 @@ export interface PostMessagePayload {
   to_family_id: string | null;
   broadcast: boolean;
   duration_s: number;
+  sample_rate_hz: number;
   audio_base64: string;
   /** Origin for building absolute download URLs (no trailing slash). */
   public_origin: string;
