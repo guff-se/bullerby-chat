@@ -45,6 +45,8 @@ npm run test:watch    # during development
 
 **`npm run deploy`** runs **`npm test` first** (`predeploy`). To deploy without tests (emergency only), use `npx wrangler deploy` directly — do not make that the default workflow.
 
+**Deployed `workers.dev` URL:** Wrangler prints it at the end of `deploy`. It matches **`https://<name>.<subdomain>.workers.dev`** where **`name`** is `wrangler.toml`’s `name` field and **`<subdomain>`** is account-specific (not in git). Confirm with `curl -sI "https://<name>.<subdomain>.workers.dev/health"` (expect `HTTP/2 200`). Firmware **Server base URL** (or NVS `bullerby` / `server_url`) must use that exact origin — no trailing slash. `wrangler deployments list` does not echo the hostname; use the deploy log or `curl` as above.
+
 Test-only secret: **`test/constants.ts`** (injected via `vitest.config.mts`); production uses **`BULLERBY_DEVICE_SECRET`** from Wrangler.
 
 ### End-to-end (WebSocket + upload + signed download)
