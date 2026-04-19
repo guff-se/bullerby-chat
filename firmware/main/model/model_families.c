@@ -70,6 +70,14 @@ esp_err_t model_init(void)
     const uint8_t default_id = (uint8_t)CONFIG_BULLERBY_DEFAULT_FAMILY_ID;
     uint8_t id = default_id;
 
+#if CONFIG_BULLERBY_ENABLE_NET && defined(CONFIG_BULLERBY_DEVICE_ID_FROM_MAC) && CONFIG_BULLERBY_DEVICE_ID_FROM_MAC
+    /* NVS `family_id` is often stale (e.g. old sdkconfig default 8 / TADAA) while the device
+     * id is now MAC-based and authoritative on the server. Skip NVS until GET …/config runs. */
+    model_my_family_id = default_id;
+    ESP_LOGI(TAG, "family id %u from Kconfig until server config (MAC identity)", (unsigned)model_my_family_id);
+    return ESP_OK;
+#endif
+
     nvs_handle_t h;
     esp_err_t err = nvs_open(MODEL_NVS_NAMESPACE, NVS_READWRITE, &h);
     if (err != ESP_OK) {

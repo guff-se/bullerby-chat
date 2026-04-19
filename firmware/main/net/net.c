@@ -82,17 +82,30 @@ static void net_worker(void *arg)
 
     /* 3) Fetch config → families + my family from server. */
     char cfg_body[3072];
+    bool config_applied = false;
     for (int i = 0; i < 5; i++) {
         size_t cfg_len = 0;
-        if (api_fetch_config(cfg_body, sizeof(cfg_body), &cfg_len) == ESP_OK && cfg_len > 0) {
-            if (model_apply_server_config_json(cfg_body) == ESP_OK) {
-#if CONFIG_BULLERBY_ENABLE_NET
-                ui_app_rebuild_home_ring();
-#endif
-            }
-            break;
+        if (api_fetch_config(cfg_body, sizeof(cfg_body), &cfg_len) != ESP_OK || cfg_len == 0) {
+            ESP_LOGW(TAG, "config fetch failed or empty (attempt %d/5)", i + 1);
+            vTaskDelay(pdMS_TO_TICKS(2000));
+            continue;
         }
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        esp_err_t aerr = model_apply_server_config_json(cfg_body);
+        if (aerr != ESP_OK) {
+            ESP_LOGE(TAG, "config JSON apply failed: %s (attempt %d/5) — keeping pre-net family id",
+                     esp_err_to_name(aerr), i + 1);
+            vTaskDelay(pdMS_TO_TICKS(2000));
+            continue;
+        }
+#if CONFIG_BULLERBY_ENABLE_NET
+        ui_app_rebuild_home_ring();
+#endif
+        config_applied = true;
+        break;
+    }
+    if (!config_applied) {
+        ESP_LOGE(TAG, "server config never applied after 5 tries — check Worker deploy vs "
+                      "bullerby.json, serial logs above, and NVS family_id if UI shows wrong home");
     }
 
     /* 4) Open WebSocket. */
