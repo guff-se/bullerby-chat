@@ -230,14 +230,16 @@ static void audio_task(void *arg)
                 size_t got = 0;
                 esp_err_t r = i2s_channel_read(rx, (uint8_t *)s_cap_buf + cap_bytes,
                                                1024, &got, pdMS_TO_TICKS(150));
-                if (r != ESP_OK) {
+                /* Short timeout so we notice stop quickly; first RX DMA may not be ready yet —
+                 * BOOT path uses portMAX_DELAY and never sees this. Do not abort on timeout. */
+                if (r != ESP_OK && r != ESP_ERR_TIMEOUT) {
                     ESP_LOGW(TAG, "[UI] i2s_channel_read: %s", esp_err_to_name(r));
                     break;
                 }
-                if (got == 0) {
-                    ESP_LOGD(TAG, "[UI] i2s read returned 0 bytes (timeout)");
-                }
                 cap_bytes += got;
+                if (r == ESP_ERR_TIMEOUT && got == 0) {
+                    continue;
+                }
             }
             i2s_channel_disable(rx);
             hal_led_set(false);
