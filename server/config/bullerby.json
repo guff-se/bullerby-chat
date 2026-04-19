@@ -10,13 +10,13 @@
     { "id": "family-h", "name": "TADAA",      "icon": "H" }
   ],
   "devices": [
-    { "id": "device-uuid-001", "family_id": "family-a" },
+    { "id": "esp-3c0f02ddeec04", "family_id": "family-a" },
     { "id": "device-uuid-002", "family_id": "family-b" },
     { "id": "device-uuid-003", "family_id": "family-c" },
     { "id": "device-uuid-004", "family_id": "family-d" },
     { "id": "device-uuid-005", "family_id": "family-e" },
     { "id": "device-uuid-006", "family_id": "family-f" },
     { "id": "device-uuid-007", "family_id": "family-g" },
-    { "id": "device-uuid-008", "family_id": "family-h" }
+    { "id": "esp-3c0f02df0618", "family_id": "family-h" }
   ]
 }

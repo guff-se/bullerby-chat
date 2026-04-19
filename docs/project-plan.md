@@ -94,7 +94,7 @@ recorded clips during development).
 **Phase B — networked (later):**
 
 - **WiFi:** Connect to configured home network (credentials via provisioning)
-- **Protocol:** WebSocket to **`GET /api/ws`** (same `Authorization` + `X-Device-Id` as HTTP)
+- **Protocol:** WebSocket to **`GET /api/ws`** (same `X-Device-Id` as HTTP). With default Kconfig, **`X-Device-Id` is `esp-` + WiFi MAC** so repeated `idf.py flash` does not make two boards share one id — register each `esp-…` in `server/config/bullerby.json`; see [server/README.md](../server/README.md).
   - JSON `{ "type": "heartbeat" }` / `{ "type": "heartbeat_ack" }` (firmware may still use ~30s cadence for UX)
   - Auto-reconnect with exponential backoff
 - **Message upload:** `POST /api/messages` — `multipart/form-data`: field **`audio`** (file), **`metadata`** (JSON string: `to_family_id`, `duration_s`, **`sample_rate_hz`** — defaults to `16000` if omitted; omit or `"ALL"`/`broadcast` for broadcast)
@@ -183,7 +183,7 @@ Family (in config)
 
 Device (in config + NVS)
   id          UUID (or MAC-based) — must match allowlist in config
-  family_id   exactly one family  (one device per family)
+  family_id   reference to exactly one family id in families[]
 
 In-flight message (server — ephemeral only)
   id          UUID
@@ -280,7 +280,7 @@ No HTTP, WebSocket, or provisioning in this phase.
 
 **Transport landed Apr 2026** (behind `CONFIG_BULLERBY_ENABLE_NET=y`): WiFi STA, `api_register` + `api_fetch_config`, `wss://…/api/ws` with 30 s heartbeat, multipart upload, unsigned audio GET, I2S playback at sender's `sample_rate_hz`. See [firmware-plan.md §Phase G](firmware-plan.md).
 
-- [x] **Server schema aligned** — firmware family table (`ANSUND`…`TADAA`) + `server/config/bullerby.json` now carry matching `server_id`s (`family-a`…`family-h`) and 8 devices (`device-uuid-001`…`008`).
+- [x] **Server schema aligned** — firmware family table (`ANSUND`…`TADAA`) + `server/config/bullerby.json` carry matching `server_id`s (`family-a`…`family-h`) and one allowlisted device id per family (see that file; ANSUND may use an `esp-…` MAC id when hardware MAC derivation is on).
 - [x] **`sample_rate_hz` round-trip** — device uploads mono 24 kHz PCM with the field in `metadata`; server stores + forwards it on `new_message`; receiving device reclocks I2S TX so the played-back audio sounds correct regardless of sender rate.
 - [x] **HTTP + WebSocket client** (`firmware/main/net/`) — HTTPS via `esp_http_client` + mbedTLS cert bundle, WSS via `esp_websocket_client`.
 - [x] **BOOT-hold capture uploads** to the server (broadcast), clipped to the 128 KiB server cap.

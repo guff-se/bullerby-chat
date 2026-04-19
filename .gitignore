@@ -1,6 +1,7 @@
 # --- Firmware (ESP-IDF) ---
 # Build tree and Component Manager download dir (versions pinned in main/idf_component.yml + dependencies.lock).
 firmware/build/
+firmware/build-ansund-device2/
 firmware/managed_components/
 firmware/.cache/
 

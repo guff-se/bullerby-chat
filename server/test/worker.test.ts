@@ -14,15 +14,15 @@ describe("Worker HTTP (integration)", () => {
 
   it("GET /api/devices/.../config without device id is 401", async () => {
     const res = await exports.default.fetch(
-      new Request("https://bullerby.test/api/devices/device-uuid-001/config")
+      new Request("https://bullerby.test/api/devices/esp-3c0f02ddeec04/config")
     );
     expect(res.status).toBe(401);
   });
 
   it("GET /api/devices/.../config with X-Device-Id returns families", async () => {
     const res = await exports.default.fetch(
-      new Request("https://bullerby.test/api/devices/device-uuid-001/config", {
-        headers: { "X-Device-Id": "device-uuid-001" },
+      new Request("https://bullerby.test/api/devices/esp-3c0f02ddeec04/config", {
+        headers: { "X-Device-Id": "esp-3c0f02ddeec04" },
       })
     );
     expect(res.status).toBe(200);
@@ -31,7 +31,7 @@ describe("Worker HTTP (integration)", () => {
       family_id: string;
       families: { id: string }[];
     };
-    expect(body.device_id).toBe("device-uuid-001");
+    expect(body.device_id).toBe("esp-3c0f02ddeec04");
     expect(body.family_id).toBe("family-a");
     expect(body.families.length).toBeGreaterThan(0);
   });

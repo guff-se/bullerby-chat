@@ -6,6 +6,8 @@
 #include "driver/i2c_master.h"
 #include "driver/i2s_std.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include "esp_codec_dev.h"
 #include "esp_codec_dev_defaults.h"
@@ -31,6 +33,33 @@ void hal_pa_enable(bool on)
     ESP_LOGI(TAG, "PA %s", on ? "ON" : "OFF");
 }
 
+/* Force the ES8311 back to reset defaults over I2C, independent of esp_codec_dev's
+ * internal init. `idf.py flash` and esp_restart() are warm boots — the codec VDD
+ * is never cycled, so any sticky registers from earlier experiments survive unless
+ * we explicitly reset. Writing 0x1F→0x00 to reg 0x00 is the datasheet reset sequence. */
+static esp_err_t es8311_soft_reset(void)
+{
+    i2c_master_dev_handle_t dev = NULL;
+    i2c_device_config_t dev_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address  = ES8311_I2C_ADDR,
+        .scl_speed_hz    = AUDIO_CODEC_I2C_FREQ,
+    };
+    esp_err_t err = i2c_master_bus_add_device(s_codec_i2c, &dev_cfg, &dev);
+    if (err != ESP_OK) {
+        return err;
+    }
+    const uint8_t reset_on[]  = {0x00, 0x1F};
+    const uint8_t reset_off[] = {0x00, 0x00};
+    err = i2c_master_transmit(dev, reset_on, sizeof(reset_on), 100);
+    if (err == ESP_OK) {
+        vTaskDelay(pdMS_TO_TICKS(20));
+        err = i2c_master_transmit(dev, reset_off, sizeof(reset_off), 100);
+    }
+    i2c_master_bus_rm_device(dev);
+    return err;
+}
+
 esp_err_t hal_codec_init(void)
 {
     ESP_LOGI(TAG, "Initializing audio codec (esp_codec_dev / ES8311)");
@@ -44,6 +73,12 @@ esp_err_t hal_codec_init(void)
     };
     ESP_RETURN_ON_ERROR(i2c_new_master_bus(&i2c_cfg, &s_codec_i2c),
                         TAG, "Codec I2C bus init failed");
+
+    esp_err_t rst_err = es8311_soft_reset();
+    if (rst_err != ESP_OK) {
+        ESP_LOGW(TAG, "ES8311 soft reset failed (%s) — continuing, codec may have stale regs",
+                 esp_err_to_name(rst_err));
+    }
 
     /* ── I2S duplex channels (master, stereo 16-bit) ──────────────────── */
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(AUDIO_I2S_PORT, I2S_ROLE_MASTER);

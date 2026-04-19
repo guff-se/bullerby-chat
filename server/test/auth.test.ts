@@ -5,9 +5,9 @@ import { config } from "../src/config";
 describe("verifyDeviceAuth", () => {
   it("accepts allowlisted device via X-Device-Id header", () => {
     const req = new Request("https://example.com/api/x", {
-      headers: { "X-Device-Id": "device-uuid-001" },
+      headers: { "X-Device-Id": "esp-3c0f02ddeec04" },
     });
-    expect(verifyDeviceAuth(req, config)?.deviceId).toBe("device-uuid-001");
+    expect(verifyDeviceAuth(req, config)?.deviceId).toBe("esp-3c0f02ddeec04");
   });
 
   it("accepts allowlisted device via ?device_id query", () => {

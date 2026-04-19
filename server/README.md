@@ -14,7 +14,9 @@ Identification-only: every request sends `X-Device-Id: <id>` (or `?device_id=<id
 
 ## Config
 
-Edit **`config/bullerby.json`** (families + one device per family), commit, then `npm run deploy`. Devices see updates on the next `GET /api/devices/{id}/config` or after a WebSocket reconnect. Each **`devices[].id`** must match the firmware **`X-Device-Id`** (Kconfig / NVS, or `esp-xxxxxxxxxxxx` when **Bullerby Chat → Derive device id from chip WiFi MAC** is enabled in menuconfig).
+Edit **`config/bullerby.json`** (families + devices), commit, then `npm run deploy`. Devices see updates on the next `GET /api/devices/{id}/config` or after a WebSocket reconnect. Each **`devices[].id`** must match the firmware **`X-Device-Id`**.
+
+**Default firmware (networking on):** `X-Device-Id` is **`esp-` + 12 hex digits** of the factory WiFi MAC (logged at boot as `identity: device_id="esp-…"`). The same `idf.py flash` image can go to every board; ids stay unique without per-device `sdkconfig`. Add each board’s `esp-…` string to **`devices[].id`** (and `family_id`). To use fixed strings like `device-uuid-001` instead, disable **Bullerby Chat → Derive device id from chip WiFi MAC** in `idf.py menuconfig` (then the **Device id** string applies; sharing one image across boards will collide unless you use different builds or NVS tooling).
 
 ## Testing (required before deploy)
 
@@ -36,7 +38,7 @@ npm run test:watch    # during development
 
 ### End-to-end (WebSocket + upload + download)
 
-**`scripts/e2e-full.mjs`** exercises the full relay path: **`wss://…/api/ws`** as **`device-uuid-002`** (with `X-Device-Id`), **`POST /api/messages`** as **`device-uuid-001`** to **`family-b`**, waits for **`new_message`**, then **`GET`**s the **`download_url`** and compares bytes to the upload.
+**`scripts/e2e-full.mjs`** exercises the full relay path: **`wss://…/api/ws`** as **`device-uuid-002`** (with `X-Device-Id`), **`POST /api/messages`** as the configured **ANSUND** device id (see `SENDER_ID` in the script / `bullerby.json`) to **`family-b`**, waits for **`new_message`**, then **`GET`**s the **`download_url`** and compares bytes to the upload.
 
 **Local (starts `wrangler dev` on port 8787):**
 

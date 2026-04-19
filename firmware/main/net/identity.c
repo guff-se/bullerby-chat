@@ -79,6 +79,7 @@ esp_err_t identity_init(void)
     }
 
 #if defined(CONFIG_BULLERBY_DEVICE_ID_FROM_MAC) && CONFIG_BULLERBY_DEVICE_ID_FROM_MAC
+    /* Stable per chip; normal `idf.py flash` does not alter MAC or this string. */
     {
         uint8_t mac[6];
         esp_read_mac(mac, ESP_MAC_WIFI_STA);

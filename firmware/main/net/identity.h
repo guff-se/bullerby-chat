@@ -9,11 +9,14 @@
  *
  *   X-Device-Id: <device_id>
  *
- * Values are loaded once from NVS namespace "bullerby" (keys `device_id`,
- * `server_url`); missing keys fall back to Kconfig.
+ * Values are loaded once from NVS namespace "bullerby" (key `server_url`; optional
+ * `device_id` is only used when MAC derivation is off in menuconfig). Missing keys
+ * fall back to Kconfig. When **Derive device id from chip WiFi MAC** is enabled
+ * (default for networked builds), `device_id` is always esp-<12 hex> from the
+ * factory WiFi MAC — stable across flashes; allowlist that string on the server.
  */
 typedef struct {
-    const char *device_id;    /**< "device-uuid-001" etc. */
+    const char *device_id;    /**< esp-<mac> (default) or fixed Kconfig/NVS id */
     const char *server_url;   /**< no trailing slash, https://…/http://… */
 } bullerby_identity_t;
 

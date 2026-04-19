@@ -31,6 +31,8 @@ CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 # Bullerby (see main/Kconfig.projbuild)
 CONFIG_BULLERBY_ENABLE_NET=n
 CONFIG_BULLERBY_DEFAULT_FAMILY_ID=8
+# When networking is enabled (local sdkconfig), derive X-Device-Id from WiFi MAC by default.
+CONFIG_BULLERBY_DEVICE_ID_FROM_MAC=y
 
 # TLS: embed Mozilla CA bundle so esp-tls / esp_http_client / esp_websocket_client
 # can verify Cloudflare Workers certs without pinning a single CA.

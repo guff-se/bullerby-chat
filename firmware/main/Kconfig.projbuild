@@ -46,17 +46,27 @@ menu "Bullerby Chat"
             https:// → wss:// and http:// → ws://.
 
     config BULLERBY_DEVICE_ID
-        string "Device id (matches server/config/bullerby.json devices[].id)"
+        string "Device id when not using MAC (matches bullerby.json devices[].id)"
         depends on BULLERBY_ENABLE_NET
         default "device-uuid-001"
+        help
+            Used only when **Derive device id from chip WiFi MAC** is disabled. When MAC
+            derivation is enabled, this string is ignored at runtime — each chip sends
+            esp-<12 hex> from the factory WiFi MAC so normal idf.py flash never collides
+            across boards. Add that exact esp-… string to server config, or turn MAC
+            derivation off and rely on this value (same image on every board then shares
+            one id — only for lab use).
 
     config BULLERBY_DEVICE_ID_FROM_MAC
-        bool "Override device id with esp-<12 hex> from factory WiFi MAC"
+        bool "Derive device id from chip WiFi MAC (esp-<12 hex>)"
         depends on BULLERBY_ENABLE_NET
-        default n
+        default y
         help
-            When enabled, after NVS/Kconfig load the device id string is replaced
-            with esp- plus the six WiFi MAC bytes in hex. Add that exact string as
-            a devices[].id entry in server/config/bullerby.json.
+            **Recommended for real hardware:** replaces the device id string with
+            esp- plus the six factory WiFi STA MAC bytes in hex. The value is stable
+            across idf.py flash (flash does not change efuse MAC). List each board’s
+            esp-… id under devices[].id in server/config/bullerby.json (same firmware
+            binary can go to every unit). NVS device_id, if present, is still overwritten
+            when this is on — turn it off only if you intentionally use a fixed string.
 
 endmenu
