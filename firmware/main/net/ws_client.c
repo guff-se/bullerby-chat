@@ -186,11 +186,9 @@ esp_err_t ws_client_start(void)
     }
 
     const bullerby_identity_t *id = identity_get();
-    char auth_hdr[256];
+    char auth_hdr[160];
     /* esp_websocket_client_config_t::headers expects raw HTTP header lines separated by \r\n. */
-    int n = snprintf(auth_hdr, sizeof(auth_hdr),
-                     "Authorization: Bearer %s\r\nX-Device-Id: %s\r\n",
-                     id->device_secret, id->device_id);
+    int n = snprintf(auth_hdr, sizeof(auth_hdr), "X-Device-Id: %s\r\n", id->device_id);
     if (n <= 0 || (size_t)n >= sizeof(auth_hdr)) {
         return ESP_ERR_INVALID_ARG;
     }

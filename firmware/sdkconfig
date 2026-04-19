@@ -603,7 +603,6 @@ CONFIG_BULLERBY_WIFI_PASS=""
 CONFIG_BULLERBY_SERVER_URL="https://bullerby-chat.guff.workers.dev"
 CONFIG_BULLERBY_DEVICE_ID="device-uuid-008"
 # CONFIG_BULLERBY_DEVICE_ID_FROM_MAC is not set
-CONFIG_BULLERBY_DEVICE_SECRET="bullerby-dev-lowsec-a4f91c2e8b70"
 # end of Bullerby Chat
 
 #

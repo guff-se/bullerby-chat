@@ -190,7 +190,7 @@ static bool load_stored_wifi_credentials(char *ssid_out, size_t ssid_sz,
 esp_err_t net_start(void)
 {
     if (!identity_is_configured()) {
-        ESP_LOGE(TAG, "identity not configured — set CONFIG_BULLERBY_DEVICE_ID/SECRET and SERVER_URL");
+        ESP_LOGE(TAG, "identity not configured — set CONFIG_BULLERBY_DEVICE_ID and SERVER_URL");
         return ESP_ERR_INVALID_STATE;
     }
 

@@ -40,13 +40,13 @@ bullerby-chat/
 │   ├── wrangler.toml              # Worker + SQLite-backed Durable Object
 │   ├── package.json
 │   ├── tsconfig.json
-│   ├── env.d.ts                   # augments Env (BULLERBY_DEVICE_SECRET)
+│   ├── env.d.ts                   # augments Env (no secrets — DO binding only)
 │   ├── worker-configuration.d.ts    # generated (`npm run types`)
 │   ├── scripts/                   # e2e-full.mjs, run-e2e-with-dev.mjs (see README.md)
 │   ├── src/
 │   │   ├── index.ts               # HTTP routes + forwards to RelayRoom
 │   │   ├── config.ts              # loads bundled config/bullerby.json
-│   │   ├── auth.ts                # Bearer + signed download URLs
+│   │   ├── auth.ts                # X-Device-Id allowlist check
 │   │   ├── types.ts
 │   │   └── durable/
 │   │       └── relay-room.ts      # WebSocket hub + ephemeral relay + alarms

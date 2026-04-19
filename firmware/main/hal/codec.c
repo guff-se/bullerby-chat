@@ -13,6 +13,8 @@ static const char *TAG = "codec";
 static i2c_master_bus_handle_t s_codec_i2c = NULL;
 static i2s_chan_handle_t s_i2s_tx = NULL;
 static i2s_chan_handle_t s_i2s_rx = NULL;
+static bool s_i2s_tx_enabled = false;
+static bool s_i2s_rx_enabled = false;
 
 i2s_chan_handle_t hal_codec_get_tx(void)
 {
@@ -22,6 +24,24 @@ i2s_chan_handle_t hal_codec_get_tx(void)
 i2s_chan_handle_t hal_codec_get_rx(void)
 {
     return s_i2s_rx;
+}
+
+esp_err_t hal_codec_tx_enable(bool on)
+{
+    if (!s_i2s_tx) return ESP_ERR_INVALID_STATE;
+    if (on == s_i2s_tx_enabled) return ESP_OK;
+    esp_err_t err = on ? i2s_channel_enable(s_i2s_tx) : i2s_channel_disable(s_i2s_tx);
+    if (err == ESP_OK) s_i2s_tx_enabled = on;
+    return err;
+}
+
+esp_err_t hal_codec_rx_enable(bool on)
+{
+    if (!s_i2s_rx) return ESP_ERR_INVALID_STATE;
+    if (on == s_i2s_rx_enabled) return ESP_OK;
+    esp_err_t err = on ? i2s_channel_enable(s_i2s_rx) : i2s_channel_disable(s_i2s_rx);
+    if (err == ESP_OK) s_i2s_rx_enabled = on;
+    return err;
 }
 
 void hal_pa_enable(bool on)
@@ -72,8 +92,8 @@ esp_err_t hal_codec_init(void)
                         TAG, "I2S RX init failed");
 
     ESP_RETURN_ON_ERROR(es8311_codec_init(s_codec_i2c), TAG, "ES8311 init failed");
-    es8311_set_volume(70);
-    es8311_set_mic_gain(4);
+    es8311_set_volume(100);
+    es8311_set_mic_gain(6);
 
     ESP_LOGI(TAG, "Codec ready (%d Hz)", AUDIO_SAMPLE_RATE);
     return ESP_OK;

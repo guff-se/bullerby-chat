@@ -138,7 +138,7 @@ Configuration changes (families, which device belongs to which family) are **not
 
 Admin CRUD endpoints are **omitted**; families/devices come from **`server/config/bullerby.json`** at deploy time.
 
-**Authentication (HTTP + WebSocket upgrade):** `Authorization: Bearer <BULLERBY_DEVICE_SECRET>` and `X-Device-Id: <device id>` for every call **except** signed audio download. Set the secret with `wrangler secret put BULLERBY_DEVICE_SECRET` (see [server/README.md](../server/README.md)).
+**Authentication:** identification-only. Every HTTP call and the WebSocket upgrade send `X-Device-Id: <device id>` (or `?device_id=` on the WS URL); the Worker accepts it if the id is listed in `config/bullerby.json`. No bearer token. Audio download URLs are unsigned. Security is not a goal for this project — see [server/README.md](../server/README.md).
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -146,7 +146,7 @@ Admin CRUD endpoints are **omitted**; families/devices come from **`server/confi
 | `POST /api/devices/register` | POST | Validates device against allowlist; returns `family_id` |
 | `GET /api/devices/{id}/config` | GET | `device_id`, `family_id`, `families[]` — path **`id`** must match authenticated device |
 | `POST /api/messages` | POST | Multipart **`audio`** + **`metadata`** (JSON); broadcast if `to_family_id` omitted / `ALL` / `broadcast` |
-| `GET /api/messages/{id}/audio?exp=&sig=` | GET | HMAC-signed download while relay still holds the blob until TTL (no Bearer) |
+| `GET /api/messages/{id}/audio` | GET | Download while relay still holds the blob until TTL |
 
 There is **no** “list unread messages on server” or “mark read on server” — persistence of “heard / not heard” is **on the device** only.
 
@@ -193,7 +193,7 @@ In-flight message (server — ephemeral only)
   expires_at    tied to relay TTL / retry policy
 ```
 
-**Secrets:** `BULLERBY_DEVICE_SECRET` via Workers Secrets (shared bearer for all devices in the current design). **Relay** audio is held in the **`RelayRoom` Durable Object** (in-memory `Map`); the DO class uses Cloudflare’s **SQLite-backed** Durable Object product on the free plan — SQLite storage API is **not** used for message blobs; alarms drive retries.
+**Secrets:** none. Auth is an `X-Device-Id` allowlist check against bundled config. **Relay** audio is held in the **`RelayRoom` Durable Object** (in-memory `Map`); the DO class uses Cloudflare’s **SQLite-backed** Durable Object product on the free plan — SQLite storage API is **not** used for message blobs; alarms drive retries.
 
 ### 3.5 Configuration (repository, not a web UI)
 
@@ -223,9 +223,8 @@ In-flight message (server — ephemeral only)
 - [x] Worker project under **`server/`** ([repo-structure.md](repo-structure.md))
 - [x] **`RelayRoom`** Durable Object (`new_sqlite_classes` migration for free plan)
 - [ ] Attach **custom domain** (optional) in Cloudflare DNS for a stable device URL
-- [x] **`BULLERBY_DEVICE_SECRET`** — `wrangler secret put BULLERBY_DEVICE_SECRET` (required for authenticated routes; value not retrievable after set — keep in **`server/.dev.vars`** or a vault for local/E2E)
 - [x] Local dev: **`cd server && npm run dev`**; deploy: **`npm run deploy`**
-- [x] **End-to-end relay script** — **`npm run test:e2e`** / **`scripts/e2e-full.mjs`** (WebSocket + upload + signed GET); optional check against deployed `*.workers.dev` — see [server/README.md](../server/README.md)
+- [x] **End-to-end relay script** — **`npm run test:e2e`** / **`scripts/e2e-full.mjs`** (WebSocket + upload + GET); optional check against deployed `*.workers.dev` — see [server/README.md](../server/README.md)
 
 ### 4.3 Development Environment
 
@@ -270,9 +269,9 @@ No HTTP, WebSocket, or provisioning in this phase.
 
 ### Phase 3: Server MVP
 
-- [x] **Cloudflare Workers** — `server/`: Wrangler, **`RelayRoom`**, REST + **`/api/ws`**, bundled **`config/bullerby.json`**, `BULLERBY_DEVICE_SECRET` auth
+- [x] **Cloudflare Workers** — `server/`: Wrangler, **`RelayRoom`**, REST + **`/api/ws`**, bundled **`config/bullerby.json`**, `X-Device-Id` allowlist auth
 - [x] Load **families/devices** from JSON at deploy; **`register`** + **`GET .../config`** enforce allowlist
-- [x] **`POST /api/messages`** + relay TTL + WebSocket **`new_message`** + signed **`GET .../audio`** + alarm retries then drop
+- [x] **`POST /api/messages`** + relay TTL + WebSocket **`new_message`** + **`GET .../audio`** + alarm retries then drop
 - [x] **`npm run deploy`** (runs **`npm test`** first); docs in [server/README.md](../server/README.md)
 - [x] **Automated tests** — Vitest + `@cloudflare/vitest-pool-workers` in `server/test/` (see [server/test/README.md](../server/test/README.md))
 - [ ] **Firmware integration** — HTTP client + WebSocket client against deployed Worker (Phase 4)
@@ -325,5 +324,5 @@ No HTTP, WebSocket, or provisioning in this phase.
 - [ ] **`config_updated` over WebSocket** — broadcast after deploy so devices refetch without reconnect-only
 - [ ] **Icon system:** Emoji-based? Or simple letter avatars? Custom bitmaps?
 - [ ] **Device inbox cap:** Max **FIFO depth**, max **MB**, or max **age** for unheard clips before eviction (firmware)
-- [ ] **Security:** Today **one shared** `BULLERBY_DEVICE_SECRET` for all devices; per-device tokens or certs later?
+- [ ] **Security:** Today auth is an `X-Device-Id` allowlist only (deliberately minimal for a family toy). If it ever matters, add per-device tokens or certs.
 - [ ] **Outbox on device:** If WiFi/server is down when sending, **queue and retry** outgoing only (separate from “missed incoming” semantics)

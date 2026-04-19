@@ -13,16 +13,13 @@ static const char *TAG = "identity";
 
 #define NVS_NS          "bullerby"
 #define NVS_KEY_DEV_ID  "device_id"
-#define NVS_KEY_DEV_SEC "device_secret"
 #define NVS_KEY_URL     "server_url"
 
 static char s_device_id[64];
-static char s_device_secret[128];
 static char s_server_url[160];
 
 static bullerby_identity_t s_identity = {
     .device_id = s_device_id,
-    .device_secret = s_device_secret,
     .server_url = s_server_url,
 };
 
@@ -50,11 +47,6 @@ esp_err_t identity_init(void)
 #else
     const char *cfg_id     = "";
 #endif
-#ifdef CONFIG_BULLERBY_DEVICE_SECRET
-    const char *cfg_secret = CONFIG_BULLERBY_DEVICE_SECRET;
-#else
-    const char *cfg_secret = "";
-#endif
 #ifdef CONFIG_BULLERBY_SERVER_URL
     const char *cfg_url    = CONFIG_BULLERBY_SERVER_URL;
 #else
@@ -64,20 +56,17 @@ esp_err_t identity_init(void)
     nvs_handle_t h;
     esp_err_t err = nvs_open(NVS_NS, NVS_READONLY, &h);
     if (err == ESP_OK) {
-        load_from_nvs_or_default(h, NVS_KEY_DEV_ID,  cfg_id,     s_device_id,     sizeof(s_device_id));
-        load_from_nvs_or_default(h, NVS_KEY_DEV_SEC, cfg_secret, s_device_secret, sizeof(s_device_secret));
-        load_from_nvs_or_default(h, NVS_KEY_URL,     cfg_url,    s_server_url,    sizeof(s_server_url));
+        load_from_nvs_or_default(h, NVS_KEY_DEV_ID, cfg_id,  s_device_id,  sizeof(s_device_id));
+        load_from_nvs_or_default(h, NVS_KEY_URL,    cfg_url, s_server_url, sizeof(s_server_url));
         nvs_close(h);
     } else {
         if (err != ESP_ERR_NVS_NOT_FOUND) {
             ESP_LOGW(TAG, "nvs_open: %s — using Kconfig defaults", esp_err_to_name(err));
         }
-        strlcpy(s_device_id,     cfg_id,     sizeof(s_device_id));
-        strlcpy(s_device_secret, cfg_secret, sizeof(s_device_secret));
-        strlcpy(s_server_url,    cfg_url,    sizeof(s_server_url));
+        strlcpy(s_device_id,  cfg_id,  sizeof(s_device_id));
+        strlcpy(s_server_url, cfg_url, sizeof(s_server_url));
     }
 
-    /* Strip trailing slash on the server URL for consistent concat. */
     size_t url_len = strlen(s_server_url);
     while (url_len > 0 && s_server_url[url_len - 1] == '/') {
         s_server_url[--url_len] = '\0';
@@ -98,9 +87,7 @@ esp_err_t identity_init(void)
     }
 #endif
 
-    ESP_LOGI(TAG, "device_id=\"%s\" server_url=\"%s\" secret_set=%s",
-             s_device_id, s_server_url,
-             s_device_secret[0] != '\0' ? "yes" : "no");
+    ESP_LOGI(TAG, "device_id=\"%s\" server_url=\"%s\"", s_device_id, s_server_url);
     return ESP_OK;
 }
 
@@ -111,7 +98,6 @@ const bullerby_identity_t *identity_get(void)
 
 bool identity_is_configured(void)
 {
-    return s_device_id[0]     != '\0' &&
-           s_device_secret[0] != '\0' &&
-           s_server_url[0]    != '\0';
+    return s_device_id[0]  != '\0' &&
+           s_server_url[0] != '\0';
 }

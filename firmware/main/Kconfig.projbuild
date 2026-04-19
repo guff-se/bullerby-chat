@@ -18,7 +18,7 @@ menu "Bullerby Chat"
             uploads recordings. Disable for pure offline UI/audio development.
 
             Requires CONFIG_BULLERBY_WIFI_SSID / PASS / SERVER_URL /
-            DEVICE_ID / DEVICE_SECRET below to be filled in — prefer a local
+            DEVICE_ID below to be filled in — prefer a local
             (gitignored) sdkconfig for real credentials.
 
     config BULLERBY_WIFI_SSID
@@ -58,14 +58,5 @@ menu "Bullerby Chat"
             When enabled, after NVS/Kconfig load the device id string is replaced
             with esp- plus the six WiFi MAC bytes in hex. Add that exact string as
             a devices[].id entry in server/config/bullerby.json.
-
-    config BULLERBY_DEVICE_SECRET
-        string "Shared device secret (matches BULLERBY_DEVICE_SECRET on the Worker)"
-        depends on BULLERBY_ENABLE_NET
-        default "bullerby-dev-lowsec-a4f91c2e8b70"
-        help
-            Dev-only shared bearer (also server/test/constants.ts). Set the same
-            value on the Worker (wrangler secret / .dev.vars). Clear or override
-            for anything beyond local bring-up.
 
 endmenu

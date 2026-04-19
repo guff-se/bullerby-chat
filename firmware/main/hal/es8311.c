@@ -119,6 +119,12 @@ esp_err_t es8311_codec_init(i2c_master_bus_handle_t i2c_bus)
     write_reg(REG_DAC3, 0x10);   // DACx2 enable for mono output
     write_reg(REG_DAC_RAMP, 0x08); // DAC ramp rate
 
+    /* Release from reset. Datasheet reg 0x00: bit 7 = CSM_ON (state machine run),
+     * bits 4..0 = individual reset asserts (1 = held in reset). Writing 0x80 clears
+     * all reset bits and turns the state machine on — without this, the ADC digital
+     * block stays in reset and the mic produces only zeros even though I2S DMA runs. */
+    write_reg(REG_RESET, 0x80);
+
     ESP_LOGI(TAG, "ES8311 initialized (24kHz/16-bit slave mode)");
 
     // Initialize PA pin but keep it off until needed
@@ -155,6 +161,42 @@ esp_err_t es8311_set_mic_gain(uint8_t gain)
     if (gain > 6) gain = 6;
     uint8_t reg_val = gain * 0x08;
     return write_reg(REG_SYS8, reg_val);
+}
+
+void es8311_dump_registers(void)
+{
+    if (!s_dev) return;
+    static const struct { uint8_t reg; const char *name; } probes[] = {
+        { REG_RESET,   "RESET  " },
+        { REG_CLK1,    "CLK1   " },
+        { REG_SDP_IN,  "SDP_IN " },
+        { REG_SDP_OUT, "SDP_OUT" },
+        { REG_SYS1,    "SYS1   " },
+        { REG_SYS2,    "SYS2   " },
+        { REG_SYS3,    "SYS3   " },
+        { REG_SYS4,    "SYS4   " },
+        { REG_SYS5,    "SYS5   " },
+        { REG_SYS6,    "SYS6   " },
+        { REG_SYS7,    "SYS7   " },
+        { REG_SYS8,    "SYS8   " },
+        { REG_SYS9,    "SYS9   " },
+        { REG_SYS10,   "SYS10  " },
+        { REG_ADC1,    "ADC1   " },
+        { REG_ADC2,    "ADC2   " },
+        { REG_ADC_VOL, "ADC_VOL" },
+        { REG_DAC1,    "DAC1   " },
+        { REG_DAC_VOL, "DAC_VOL" },
+    };
+    for (size_t i = 0; i < sizeof(probes) / sizeof(probes[0]); i++) {
+        uint8_t v = 0xFF;
+        esp_err_t err = read_reg(probes[i].reg, &v);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "reg 0x%02X %s = 0x%02X", probes[i].reg, probes[i].name, v);
+        } else {
+            ESP_LOGW(TAG, "reg 0x%02X %s read failed: %s",
+                     probes[i].reg, probes[i].name, esp_err_to_name(err));
+        }
+    }
 }
 
 esp_err_t es8311_pa_enable(bool enable)

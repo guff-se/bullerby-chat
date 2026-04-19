@@ -1,6 +1,6 @@
 import { RelayRoom } from "./durable/relay-room";
 import { config, deviceById } from "./config";
-import { verifyDeviceAuth, verifyDownloadQuery } from "./auth";
+import { verifyDeviceAuth } from "./auth";
 import type { MessageMetadata, PostMessagePayload } from "./types";
 
 export { RelayRoom };
@@ -102,7 +102,7 @@ export default {
     }
 
     if (url.pathname === "/api/ws") {
-      const auth = verifyDeviceAuth(request, env, config);
+      const auth = verifyDeviceAuth(request, config);
       if (!auth) {
         return new Response("Unauthorized", { status: 401 });
       }
@@ -110,7 +110,7 @@ export default {
     }
 
     if (url.pathname === "/api/devices/register" && request.method === "POST") {
-      const auth = verifyDeviceAuth(request, env, config);
+      const auth = verifyDeviceAuth(request, config);
       if (!auth) {
         return new Response("Unauthorized", { status: 401 });
       }
@@ -124,7 +124,7 @@ export default {
 
     const configMatch = /^\/api\/devices\/([^/]+)\/config$/.exec(url.pathname);
     if (configMatch && request.method === "GET") {
-      const auth = verifyDeviceAuth(request, env, config);
+      const auth = verifyDeviceAuth(request, config);
       if (!auth) {
         return new Response("Unauthorized", { status: 401 });
       }
@@ -144,7 +144,7 @@ export default {
     }
 
     if (url.pathname === "/api/messages" && request.method === "POST") {
-      const auth = verifyDeviceAuth(request, env, config);
+      const auth = verifyDeviceAuth(request, config);
       if (!auth) {
         return new Response("Unauthorized", { status: 401 });
       }
@@ -154,12 +154,6 @@ export default {
     const audioMatch = /^\/api\/messages\/([^/]+)\/audio$/.exec(url.pathname);
     if (audioMatch && request.method === "GET") {
       const messageId = decodeURIComponent(audioMatch[1]!);
-      const exp = url.searchParams.get("exp");
-      const sig = url.searchParams.get("sig");
-      const ok = await verifyDownloadQuery(messageId, exp, sig, env);
-      if (!ok) {
-        return new Response("Unauthorized", { status: 401 });
-      }
       return stub.fetch(
         new Request(
           `${RELAY_INTERNAL}/internal/audio/${encodeURIComponent(messageId)}`,

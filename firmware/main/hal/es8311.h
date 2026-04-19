@@ -17,4 +17,7 @@ esp_err_t es8311_set_mic_gain(uint8_t gain);
 // Enable or disable the speaker power amplifier.
 esp_err_t es8311_pa_enable(bool enable);
 
+// Read back key config registers and log them. Diagnostic only.
+void es8311_dump_registers(void);
+
 #endif // HAL_ES8311_H

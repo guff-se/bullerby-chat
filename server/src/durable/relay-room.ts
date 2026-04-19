@@ -1,6 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
 import { config, deviceById, deviceIdForFamily, familyById } from "../config";
-import { signDownloadToken } from "../auth";
 import type { PostMessagePayload } from "../types";
 
 const TTL_MS = 10 * 60 * 1000;
@@ -44,7 +43,11 @@ export class RelayRoom extends DurableObject {
   }
 
   private handleWebSocket(request: Request): Response {
-    const deviceId = request.headers.get("X-Device-Id")?.trim();
+    const url = new URL(request.url);
+    const deviceId =
+      request.headers.get("X-Device-Id")?.trim() ||
+      url.searchParams.get("device_id")?.trim() ||
+      "";
     if (!deviceId || !deviceById(deviceId)) {
       return new Response("Unauthorized", { status: 401 });
     }
@@ -176,12 +179,7 @@ export class RelayRoom extends DurableObject {
   }
 
   private async deliverRound(msg: PendingMessage): Promise<void> {
-    const secret = (this.env as { BULLERBY_DEVICE_SECRET?: string }).BULLERBY_DEVICE_SECRET;
-    if (!secret) return;
-
-    const expUnix = Math.floor(msg.expires_at / 1000);
-    const { exp, sig } = await signDownloadToken(msg.id, expUnix, secret);
-    const downloadUrl = `${msg.public_origin}/api/messages/${encodeURIComponent(msg.id)}/audio?exp=${encodeURIComponent(exp)}&sig=${encodeURIComponent(sig)}`;
+    const downloadUrl = `${msg.public_origin}/api/messages/${encodeURIComponent(msg.id)}/audio`;
 
     const remaining: string[] = [];
     for (const deviceId of msg.pending_device_ids) {

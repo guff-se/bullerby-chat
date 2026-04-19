@@ -74,6 +74,10 @@ uint8_t hal_touch_consume_gesture(void);
 /** Initialise ES8311 codec (I2C + I2S). */
 esp_err_t hal_codec_init(void);
 
+/** Idempotent enable/disable of the I2S TX/RX channels (tracks state to avoid duplicate calls). */
+esp_err_t hal_codec_tx_enable(bool on);
+esp_err_t hal_codec_rx_enable(bool on);
+
 /** Enable / disable the speaker amplifier. */
 void hal_pa_enable(bool on);
 

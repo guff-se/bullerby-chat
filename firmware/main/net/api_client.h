@@ -31,8 +31,8 @@ esp_err_t api_post_message(const char *to_family_server_id,
                            int sample_rate_hz, float duration_s);
 
 /**
- * Download a signed audio URL (from a `new_message` event) into `buf`.
+ * Download an audio URL (from a `new_message` event) into `buf`.
  * On success writes received byte count to `*out_len`.
  */
-esp_err_t api_download_audio(const char *signed_url,
+esp_err_t api_download_audio(const char *url,
                              uint8_t *buf, size_t buf_cap, size_t *out_len);

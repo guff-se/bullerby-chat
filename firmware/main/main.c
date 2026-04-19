@@ -62,19 +62,14 @@ static void i2s_duplex_tx_silence_tick(i2s_chan_handle_t tx)
 static esp_err_t i2s_duplex_mic_start(i2s_chan_handle_t tx, i2s_chan_handle_t rx)
 {
     hal_pa_enable(false);
-    esp_err_t err = ESP_OK;
-    if (tx) {
-        err = i2s_channel_enable(tx);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "I2S TX enable failed: %s", esp_err_to_name(err));
-        }
+    esp_err_t err = hal_codec_tx_enable(true);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "I2S TX enable failed: %s", esp_err_to_name(err));
     }
-    err = i2s_channel_enable(rx);
+    err = hal_codec_rx_enable(true);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "I2S RX enable failed: %s", esp_err_to_name(err));
-        if (tx) {
-            i2s_channel_disable(tx);
-        }
+        hal_codec_tx_enable(false);
         return err;
     }
     /* Prime TX FIFO so the link runs before first RX read. */
@@ -84,12 +79,10 @@ static esp_err_t i2s_duplex_mic_start(i2s_chan_handle_t tx, i2s_chan_handle_t rx
 
 static void i2s_duplex_mic_stop(i2s_chan_handle_t tx, i2s_chan_handle_t rx)
 {
-    if (rx) {
-        i2s_channel_disable(rx);
-    }
-    if (tx) {
-        i2s_channel_disable(tx);
-    }
+    (void)tx;
+    (void)rx;
+    hal_codec_rx_enable(false);
+    hal_codec_tx_enable(false);
 }
 
 /* ── Audio shared state ─────────────────────────────────────────────── */
@@ -141,7 +134,10 @@ static void play_mono_pcm(const int16_t *mono, size_t mono_bytes, int sample_rat
     i2s_chan_handle_t tx = hal_codec_get_tx();
     if (!tx) return;
 
-    i2s_channel_disable(tx);
+    hal_codec_tx_enable(false);
+
+    /* Held in BSS — play_mono_pcm runs serialised behind s_audio_lock, so sharing is safe. */
+    static int16_t stereo_chunk[480 * 2];
 
     /* Retune TX clock if needed, then restore to mic rate on the way out. */
     bool retuned = (sample_rate > 0 && sample_rate != AUDIO_SAMPLE_RATE);
@@ -156,9 +152,8 @@ static void play_mono_pcm(const int16_t *mono, size_t mono_bytes, int sample_rat
     }
 
     hal_pa_enable(true);
-    i2s_channel_enable(tx);
+    hal_codec_tx_enable(true);
 
-    int16_t stereo_chunk[480 * 2];
     size_t frames = mono_bytes / sizeof(int16_t);
     size_t done = 0;
     while (done < frames) {
@@ -173,7 +168,7 @@ static void play_mono_pcm(const int16_t *mono, size_t mono_bytes, int sample_rat
         done += chunk;
     }
 
-    i2s_channel_disable(tx);
+    hal_codec_tx_enable(false);
     hal_pa_enable(false);
 
     if (retuned) {
@@ -436,7 +431,7 @@ void app_main(void)
     ESP_LOGI(TAG, "Networking disabled (CONFIG_BULLERBY_ENABLE_NET=n)");
 #endif
 
-    xTaskCreate(audio_task, "audio", 4096, NULL, 5, NULL);
+    xTaskCreate(audio_task, "audio", 8192, NULL, 5, NULL);
 
     ESP_LOGI(TAG, "Ready. Record: open a family → red button (serial tag [UI]); or BOOT hold ([BOOT]).");
 }

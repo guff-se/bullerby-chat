@@ -14,7 +14,6 @@
 
 static const char *TAG = "api_client";
 
-#define AUTH_HEADER_MAX 160
 #define URL_MAX         256
 #define MULTIPART_BOUNDARY "----bullerby7f3c2e9a"
 
@@ -23,9 +22,6 @@ static const char *TAG = "api_client";
 static void apply_auth_headers(esp_http_client_handle_t c)
 {
     const bullerby_identity_t *id = identity_get();
-    char auth[AUTH_HEADER_MAX];
-    snprintf(auth, sizeof(auth), "Bearer %s", id->device_secret);
-    esp_http_client_set_header(c, "Authorization", auth);
     esp_http_client_set_header(c, "X-Device-Id", id->device_id);
 }
 
@@ -84,9 +80,6 @@ esp_err_t api_register(void)
         .url = url,
         .method = HTTP_METHOD_POST,
         .timeout_ms = 15000,
-        /* Bearer auth: skip esp_http_client Digest/Basic retry on 401 (often no
-         * WWW-Authenticate → ESP_ERR_NOT_SUPPORTED and opaque failure). */
-        .max_authorization_retries = -1,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .event_handler = http_event_collect,
         .user_data = &sink,
@@ -103,11 +96,7 @@ esp_err_t api_register(void)
     esp_http_client_cleanup(client);
 
     if (err != ESP_OK) {
-        if (status == 401) {
-            ESP_LOGE(TAG, "register HTTP 401 (check X-Device-Id + Bearer secret vs Worker)");
-        } else {
-            ESP_LOGE(TAG, "register transport failed: %s", esp_err_to_name(err));
-        }
+        ESP_LOGE(TAG, "register transport failed: %s (status=%d)", esp_err_to_name(err), status);
         return err;
     }
     if (status != 200) {
@@ -142,7 +131,6 @@ esp_err_t api_fetch_config(char *body, size_t cap, size_t *out_len)
         .url = url,
         .method = HTTP_METHOD_GET,
         .timeout_ms = 15000,
-        .max_authorization_retries = -1,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .event_handler = http_event_collect,
         .user_data = &sink,
@@ -157,11 +145,7 @@ esp_err_t api_fetch_config(char *body, size_t cap, size_t *out_len)
     esp_http_client_cleanup(client);
 
     if (err != ESP_OK) {
-        if (status == 401) {
-            ESP_LOGE(TAG, "config HTTP 401 (check device id + Bearer secret vs Worker)");
-        } else {
-            ESP_LOGE(TAG, "config transport failed: %s", esp_err_to_name(err));
-        }
+        ESP_LOGE(TAG, "config transport failed: %s (status=%d)", esp_err_to_name(err), status);
         return err;
     }
     if (status != 200) {
@@ -260,7 +244,6 @@ esp_err_t api_post_message(const char *to_family_server_id,
         .url = url,
         .method = HTTP_METHOD_POST,
         .timeout_ms = 20000,
-        .max_authorization_retries = -1,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .event_handler = http_event_collect,
         .user_data = &sink,
@@ -282,11 +265,7 @@ esp_err_t api_post_message(const char *to_family_server_id,
     free(body);
 
     if (err != ESP_OK) {
-        if (status == 401) {
-            ESP_LOGE(TAG, "post_message HTTP 401 (check device id + Bearer secret vs Worker)");
-        } else {
-            ESP_LOGE(TAG, "post_message transport failed: %s", esp_err_to_name(err));
-        }
+        ESP_LOGE(TAG, "post_message transport failed: %s (status=%d)", esp_err_to_name(err), status);
         return err;
     }
     if (status != 200) {
@@ -302,17 +281,16 @@ esp_err_t api_post_message(const char *to_family_server_id,
 
 /* ── Download audio ─────────────────────────────────────────────────── */
 
-esp_err_t api_download_audio(const char *signed_url,
+esp_err_t api_download_audio(const char *url,
                              uint8_t *buf, size_t buf_cap, size_t *out_len)
 {
-    if (!signed_url || !buf || !out_len) return ESP_ERR_INVALID_ARG;
+    if (!url || !buf || !out_len) return ESP_ERR_INVALID_ARG;
     *out_len = 0;
 
     esp_http_client_config_t cfg = {
-        .url = signed_url,
+        .url = url,
         .method = HTTP_METHOD_GET,
         .timeout_ms = 20000,
-        .max_authorization_retries = -1,
         .crt_bundle_attach = esp_crt_bundle_attach,
     };
     esp_http_client_handle_t client = esp_http_client_init(&cfg);

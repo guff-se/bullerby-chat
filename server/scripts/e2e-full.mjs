@@ -1,10 +1,9 @@
 /**
- * End-to-end: WebSocket (receiver) + multipart POST (sender) + signed audio GET.
- * Expects a running worker (e.g. wrangler dev) with BULLERBY_DEVICE_SECRET set.
+ * End-to-end: WebSocket (receiver) + multipart POST (sender) + audio GET.
+ * Expects a running worker (e.g. wrangler dev).
  *
  * Env:
  *   E2E_BASE_URL — default http://127.0.0.1:8787
- *   BULLERBY_DEVICE_SECRET — required (must match worker)
  */
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -42,17 +41,10 @@ export async function runE2e(options) {
     /\/$/,
     ""
   );
-  const secret = options?.secret ?? process.env.BULLERBY_DEVICE_SECRET;
-  if (!secret) {
-    throw new Error("BULLERBY_DEVICE_SECRET is required");
-  }
 
   const origin = new URL(baseUrl).origin;
   const wsUrl = origin.replace(/^http/, "ws") + "/api/ws";
-  const headers = {
-    Authorization: `Bearer ${secret}`,
-    "X-Device-Id": RECEIVER_ID,
-  };
+  const headers = { "X-Device-Id": RECEIVER_ID };
 
   const mockAudio = new Uint8Array([
     0x52, 0x49, 0x46, 0x46, 0x0c, 0x00, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45,
@@ -80,10 +72,7 @@ export async function runE2e(options) {
 
     const postRes = await fetch(`${origin}/api/messages`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${secret}`,
-        "X-Device-Id": SENDER_ID,
-      },
+      headers: { "X-Device-Id": SENDER_ID },
       body: form,
     });
 

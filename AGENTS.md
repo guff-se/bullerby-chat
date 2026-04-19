@@ -159,11 +159,11 @@ From `server/`:
 npm test
 ```
 
-`npm run deploy` runs **`npm test` first** (`predeploy`). **Do not** ship Worker changes without passing tests. **Do not** add production secrets to `test/` — use `test/constants.ts` (test-only) and Wrangler `BULLERBY_DEVICE_SECRET` for real deploys.
+`npm run deploy` runs **`npm test` first** (`predeploy`). **Do not** ship Worker changes without passing tests.
 
-**End-to-end (relay):** **`npm run test:e2e`** runs **`scripts/e2e-full.mjs`** against a local **`wrangler dev`** instance (or use **`E2E_SKIP_SERVER=1`**, **`E2E_BASE_URL`**, and **`BULLERBY_DEVICE_SECRET`** to hit a deployed Worker — see **`server/README.md`**). The script checks **`wss`**, multipart **`POST /api/messages`**, **`new_message`** on the socket, and signed **`GET …/audio`**. Run it after meaningful relay or auth changes.
+**End-to-end (relay):** **`npm run test:e2e`** runs **`scripts/e2e-full.mjs`** against a local **`wrangler dev`** instance (or use **`E2E_SKIP_SERVER=1`** + **`E2E_BASE_URL`** to hit a deployed Worker — see **`server/README.md`**). The script checks **`wss`**, multipart **`POST /api/messages`**, **`new_message`** on the socket, and **`GET …/audio`**. Run it after meaningful relay or auth changes.
 
-**Secrets:** `wrangler secret put` values are **not** readable back from Cloudflare. Keep **`server/.dev.vars`** (gitignored) aligned with production for local dev and E2E, or rotate and update both.
+**Secrets:** none. Auth is an `X-Device-Id` allowlist check against `server/config/bullerby.json`.
 
 See **`server/README.md`** (Testing section) and **`server/test/README.md`**.
 
@@ -216,7 +216,7 @@ No shared CI workflow is checked in yet. If you add one, document it here and ke
 - **ESP-IDF:** Install and export the environment per Espressif docs; `IDF_PATH` must point at the toolchain used to build.
 - **Project:** `cd firmware` then `idf.py build`. Use `sdkconfig.defaults` as the baseline; local `sdkconfig` is developer-specific.
 - **Hardware:** ESP32-S3 dev board with GC9A01 round LCD, ES8311, CST816D — see `docs/product-description.md`.
-- **Secrets:** Do not commit WiFi passwords, API keys, or certificates. For firmware networking, set `CONFIG_BULLERBY_WIFI_SSID` / `CONFIG_BULLERBY_WIFI_PASS` / `CONFIG_BULLERBY_DEVICE_SECRET` in the **local, untracked** `firmware/sdkconfig` (via `idf.py menuconfig` → Bullerby Chat), **not** in `sdkconfig.defaults`. Device id / server URL may also be seeded via NVS namespace **`bullerby`** at runtime and will override Kconfig.
+- **Secrets:** Do not commit WiFi passwords, API keys, or certificates. For firmware networking, set `CONFIG_BULLERBY_WIFI_SSID` / `CONFIG_BULLERBY_WIFI_PASS` in the **local, untracked** `firmware/sdkconfig` (via `idf.py menuconfig` → Bullerby Chat), **not** in `sdkconfig.defaults`. Device id / server URL may also be seeded via NVS namespace **`bullerby`** at runtime and will override Kconfig.
 - **Cloudflare (Workers):** The backend lives under `server/` (Wrangler). **`npm run deploy`** runs **`npm test` first**; after meaningful Worker changes, run tests then deploy. Where the maintainer has run `wrangler login`, agents may run `cd server && npm run deploy` so production stays in sync. If deploy fails (no auth, wrong account), use `wrangler login` or `CLOUDFLARE_API_TOKEN` per [Wrangler docs](https://developers.cloudflare.com/workers/wrangler/commands/#login). Do not commit API tokens.
 
 ---
