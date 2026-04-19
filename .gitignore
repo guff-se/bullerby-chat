@@ -4,7 +4,8 @@ firmware/build/
 firmware/managed_components/
 firmware/.cache/
 
-# Local Kconfig backup after menuconfig
+# Per-developer Kconfig state — only `sdkconfig.defaults` is canonical.
+firmware/sdkconfig
 firmware/sdkconfig.old
 
 # --- Server (see also server/.gitignore) ---
@@ -19,9 +20,6 @@ Thumbs.db
 *.swp
 *.swo
 *~
-
-# Font tooling (download Montserrat from Google Fonts / gstatic when regenerating)
-firmware/tools/fonts/*.ttf
 
 # Python (tooling / IDF helper scripts)
 __pycache__/

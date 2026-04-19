@@ -80,7 +80,7 @@ This document guides AI agents (e.g. Cursor) in developing and maintaining **Bul
 
 | Layer | What to check |
 |-------|----------------|
-| **HAL** (`firmware/main/hal/`) | Display, touch, codec, LED, battery — contracts and pin config in `hal.h` / `product-description.md` |
+| **HAL** (`firmware/main/hal/`) | Display, touch, codec, LED, power latch — contracts and pin config in `hal.h` / `product-description.md` |
 | **App / UI** (`firmware/main/app/`, LVGL in `main.c` / `ui_app.c`) | Screen flow, LVGL task safety, no long I2C work on LVGL thread |
 | **Model** (`firmware/main/model/`) | Dummy families/messages; **`family_t.server_id`** is the bridge to server-side ids (`family-a`…) — keep aligned with `server/config/bullerby.json` |
 | **Partitions / storage** (`firmware/partitions.csv`, SPIFFS) | Clip storage and OTA layout per `firmware-plan.md` |
@@ -137,6 +137,8 @@ idf.py build
 idf.py -p /dev/tty.usbserial-* flash monitor
 ```
 
+**Loading ESP-IDF in this shell:** run `get_idf` before any `idf.py` command. It sources the toolchain and sets `IDF_PATH`. If `idf.py` is not found, you forgot this step.
+
 Use `idf.py menuconfig` when changing Kconfig; align with `sdkconfig.defaults` for defaults you commit.
 
 ### Development loop (firmware)
@@ -190,7 +192,7 @@ No shared CI workflow is checked in yet. If you add one, document it here and ke
 ### Changing HAL or hardware assumptions
 
 1. Confirm pins and peripherals against `docs/product-description.md` and `firmware/main/hal/hal.h`.
-2. Build and flash; verify display, touch, audio, and battery as affected.
+2. Build and flash; verify display, touch, and audio as affected.
 3. **Coherence:** Update `product-description.md` or `firmware-plan.md` if the board or wiring story changes.
 
 ### Touching firmware networking (`firmware/main/net/`)

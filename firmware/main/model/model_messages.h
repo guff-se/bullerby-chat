@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/** One inbox item (dummy data until NVS / server). */
+/** One inbox item. Storage starts empty; populated from the server on new_message. */
 typedef struct {
     uint8_t id;
     uint8_t from_family_id;

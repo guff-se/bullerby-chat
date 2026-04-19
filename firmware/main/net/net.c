@@ -27,7 +27,7 @@ static const char *TAG = "net";
 #define NVS_KEY_WIFI_SSID "wifi_ssid"
 #define NVS_KEY_WIFI_PASS "wifi_pass"
 
-/* Signed URL + metadata is small; 512 B per event is plenty. */
+/* Download URL + metadata is small; 512 B per event is plenty. */
 #define INBOX_URL_MAX     384
 #define INBOX_FAMILY_MAX  48
 #define INBOX_QUEUE_DEPTH 4

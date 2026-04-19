@@ -24,7 +24,6 @@ idf_component_register(
         esp_netif
         nvs_flash
         esp_driver_ledc
-        esp_adc
         spi_flash
         app_update
         esp-tls

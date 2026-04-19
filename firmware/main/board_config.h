@@ -62,10 +62,6 @@
 // --- LED ---
 #define LED_PIN                 GPIO_NUM_48
 
-// --- Battery ---
-#define BATTERY_ADC_PIN         GPIO_NUM_1
-#define BATTERY_CHARGE_PIN      GPIO_NUM_41
-
 // --- Power ---
 #define POWER_HOLD_PIN          GPIO_NUM_3  // RTC GPIO, hold HIGH to stay powered
 

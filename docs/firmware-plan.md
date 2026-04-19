@@ -22,7 +22,7 @@ rewriting the UI core.
 | **Stable HAL** | Keep `hal/` as thin drivers; app logic and LVGL live above. |
 | **Future-proof** | Clear seams for “config source” (static → server) and “transport” (none → HTTP/WS). |
 
-**Hardware (current codebase):** ESP32-S3, GC9A01 round LCD, CST816D touch, ES8311 codec + I2S, status LED, boot button, battery ADC + charge detect. Pins: `main/hal/hal.h`.
+**Hardware (current codebase):** ESP32-S3, GC9A01 round LCD, CST816D touch, ES8311 codec + I2S, status LED, boot button. Battery ADC and charge-detect pins exist on the board but are unused — devices are wall-powered. Pins: `main/hal/hal.h`.
 
 ---
 
@@ -52,10 +52,10 @@ Already in place:
 - GC9A01 + LVGL 9 + esp_lvgl_port (partial buffers, RGB565 byte swap, rotation)
 - CST816D touch → LVGL pointer device; **hardware gesture** register is **read and logged** on change (not yet driving carousel logic)
 - ES8311 + I2S at 24 kHz via the managed **`esp_codec_dev`** component (mirrors xiaozhi-esp32 sp-esp32-s3-1.28-box). Both I2S channels enabled once in `hal_codec_init` and left running; TX silently clocks zeros when idle. `hal_pa_enable` gates the speaker amp around playback. Current levels: `set_in_gain=36 dB` (SNR/level tradeoff), `set_out_vol=100`. `hw_gain={pa_voltage=5.0 V, codec_dac_voltage=3.3 V}` so the codec DAC is scaled correctly. **Boot-button** hold → record to PSRAM → release → playback (PCM loopback)
-- Battery % + charging flag on screen; **low-battery** tint below `BATTERY_PCT_LOW_WARN` (15%); status LED
-- **Networking** (Phase G — landed Apr 2026) behind **`CONFIG_BULLERBY_ENABLE_NET`** (off by default in `sdkconfig.defaults`; may be on in a checked-in `sdkconfig`): WiFi STA from **`CONFIG_BULLERBY_WIFI_SSID/PASS`** when SSID is non-empty, else NVS `bullerby` keys **`wifi_ssid`** / **`wifi_pass`** → `api_register` + `api_fetch_config` → `wss://…/api/ws` with 30 s heartbeat → on `new_message`, signed HTTPS GET → I2S playback at sender's `sample_rate_hz`. BOOT-hold capture also uploads mono PCM via multipart POST when online (clipped to the server's 128 KiB cap). All HTTPS/WSS verified against the **mbedTLS cert bundle** (`esp_crt_bundle_attach`)
+- Status LED (solid during capture)
+- **Networking** (Phase G — landed Apr 2026) behind **`CONFIG_BULLERBY_ENABLE_NET`** (off by default in `sdkconfig.defaults`; may be on in a checked-in `sdkconfig`): WiFi STA from **`CONFIG_BULLERBY_WIFI_SSID/PASS`** when SSID is non-empty, else NVS `bullerby` keys **`wifi_ssid`** / **`wifi_pass`** → `api_register` + `api_fetch_config` → `wss://…/api/ws` with 30 s heartbeat → on `new_message`, unsigned HTTPS GET → I2S playback at sender's `sample_rate_hz`. BOOT-hold capture also uploads mono PCM via multipart POST when online (clipped to the server's 128 KiB cap). All HTTPS/WSS verified against the **mbedTLS cert bundle** (`esp_crt_bundle_attach`)
 - **Model:** `family_t` + **ALLA** (broadcast); **`message_t`** + in-memory **inbox** (`model_messages.c`); **`model_my_family_id`** from **NVS** then **`GET …/config`** `family_id` via **`model_apply_server_config_json()`** when net is up; static `family-a`…`h` table is the offline fallback; optional **`model_set_my_family_id()`** for provisioning
-- **UI (`ui_app.c`):** **Home** = **ring of family circles** (even angular spacing, emoji inside each) + **status** (battery); **center message bubble** when the dummy inbox has items (tap → model mark-read / state); **Recording** = full-bleed family colour, title bar, **Record/Stop**, back, **random Swedish send toast**, **30 s max** UI timer; **Record/Stop** drives **real** I2S capture on `audio_task` (same pipeline as **BOOT** hold: PCM → loopback + optional upload). No horizontal strip / zoom overlay in current tree — superseded by v2 (see **ui-spec.md** implementation notes).
+- **UI (`ui_app.c`):** **Home** = **ring of family circles** (even angular spacing, emoji inside each); **center message bubble** when the dummy inbox has items (tap → model mark-read / state); **Recording** = full-bleed family colour, title bar, **Record/Stop**, back, **random Swedish send toast**, **30 s max** UI timer; **Record/Stop** drives **real** I2S capture on `audio_task` (same pipeline as **BOOT** hold: PCM → loopback + optional upload). No horizontal strip / zoom overlay in current tree — superseded by v2 (see **ui-spec.md** implementation notes).
 
 **Gaps for product UX:** Record/stop drives **I2S** from the UI; Opus + SPIFFS; **dedicated inbox list** + decode→speaker playback; optional **LED / sound** on send; optional CST816D **gesture** pager; richer **screen transitions** beyond fade.
 
@@ -91,7 +91,6 @@ Purpose: predictable building blocks for the app layer.
 - [x] **Power latch:** `hal_power_init` holds `POWER_HOLD_PIN` (GPIO3) high via `rtc_gpio_*`, keeping the regulator on for soft-power push-button boards. Harmless if the latch circuit is absent.
 - [ ] **Touch:** Ensure no long I2C work on LVGL task; keep CST816D read in registered callback (already).
 - [ ] **Swipe / gesture probe:** The CST816D exposes a **gesture** register (see `CST816D_REG_GESTURE` in `touch.c`). Build a small test mode or boot-time logging that prints **hardware-reported gesture codes** when the user swipes (up/down/left/right if supported). Goal: verify whether we get **reliable swipe direction** from the chip vs. having to infer swipes from raw coordinate streams in software. If hardware gestures are stable on this board, we can use **horizontal swipes to move between families** on the home screen (carousel / pager) instead of or in addition to a dense icon grid.
-- [x] **Battery:** Low-battery threshold for UI warning — `BATTERY_PCT_LOW_WARN` (15%) in `hal.h`; home status bar turns red when not charging.
 - [x] **Networking flag:** `CONFIG_BULLERBY_ENABLE_NET` in `sdkconfig` / `sdkconfig.defaults` disables WiFi + HTTPS + WSS for offline dev.
 
 ### Phase B — App model (dummy data)
@@ -260,7 +259,7 @@ Use **`idf.py menuconfig`** for PSRAM, CPU frequency, and optional WiFi disable.
 - [x] Record/stop from UI + max duration — **codec** path in `main.c` shared with BOOT hold
 - [ ] Opus + SPIFFS persistence (or PCM interim)
 - [ ] Simulated incoming message path
-- [x] **Battery** warning tint on home; **LED** messaging patterns still TODO
+- [ ] **LED** messaging patterns (only solid-on during capture today)
 - [x] Networking optional / off by default for dev (`CONFIG_BULLERBY_ENABLE_NET`); full Phase G transport landed
 - [ ] CST816D swipe/gesture evaluation documented; optional pager UX if stable
 

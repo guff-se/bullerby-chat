@@ -54,20 +54,34 @@ extern i2s_chan_handle_t hal_codec_get_rx(void);
 #define AUDIO_BUF_BYTES    (AUDIO_BUF_SAMPLES * sizeof(int16_t))
 /** Server cap is 128 KiB. At 24 kHz mono 16-bit that's ~2.7 s of audio. */
 #define UPLOAD_CAP_BYTES   (128 * 1024)
+/** Matches server upload cap; one slot holds the most recent remote message for replay. */
+#define REPLAY_BUF_BYTES   UPLOAD_CAP_BYTES
 
 /** Stereo capture buffer (interleaved L/R 16-bit). */
 static int16_t *s_cap_buf = NULL;
 /** Mono upload / playback buffer (left channel only). */
 static int16_t *s_mono_buf = NULL;
 
+/** Replay slot for the last remote message. Written under `s_audio_lock`. */
+static uint8_t *s_replay_buf   = NULL;
+static size_t   s_replay_bytes = 0;
+static int      s_replay_sr    = 0;
+
 static SemaphoreHandle_t s_audio_lock;
 
 /** Set from LVGL when the record screen starts/stops capture (`audio_task` polls this). */
 static atomic_bool s_ui_mic_recording = ATOMIC_VAR_INIT(false);
+/** Set from LVGL on bubble tap; `audio_task` clears it and plays the replay slot. */
+static atomic_bool s_replay_pending = ATOMIC_VAR_INIT(false);
 
 void app_audio_set_ui_recording(bool active)
 {
     atomic_store_explicit(&s_ui_mic_recording, active, memory_order_release);
+}
+
+void app_audio_request_replay(void)
+{
+    atomic_store_explicit(&s_replay_pending, true, memory_order_release);
 }
 
 static void audio_lock(void)
@@ -189,6 +203,9 @@ static void finish_capture_and_play(const char *ctx, size_t cap_stereo_bytes)
                      ctx, (unsigned)up_bytes);
         }
         float duration = (float)up_bytes / (float)(AUDIO_SAMPLE_RATE * 2);
+        /* TODO(phase-g-ui): pass ui_app_get_selected_family_server_id() here
+         * so a recording from a specific family screen goes to that family
+         * only. BOOT-hold will stay NULL (broadcast). */
         esp_err_t uerr = net_send_pcm(NULL /* broadcast */,
                                       (const uint8_t *)s_mono_buf, up_bytes,
                                       AUDIO_SAMPLE_RATE, duration);
@@ -242,6 +259,19 @@ static void audio_task(void *arg)
      * the PA (via hal_pa_enable) around playback, and keep reading from RX DMA while
      * the UI/BOOT button says to capture. */
     for (;;) {
+        if (atomic_exchange_explicit(&s_replay_pending, false, memory_order_acq_rel)) {
+            audio_lock();
+            if (s_replay_bytes > 0 && s_replay_buf) {
+                ESP_LOGI(TAG, "[REPLAY] playing %u bytes @ %d Hz",
+                         (unsigned)s_replay_bytes, s_replay_sr);
+                play_mono_pcm((const int16_t *)s_replay_buf, s_replay_bytes, s_replay_sr);
+            } else {
+                ESP_LOGI(TAG, "[REPLAY] nothing to replay");
+            }
+            audio_unlock();
+            continue;
+        }
+
         if (atomic_load_explicit(&s_ui_mic_recording, memory_order_acquire)) {
             audio_lock();
             ESP_LOGI(TAG, "[UI] microphone capture started (stop button or timeout ends session)");
@@ -324,9 +354,29 @@ static void on_remote_audio(const uint8_t *pcm, size_t pcm_len,
     ESP_LOGI(TAG, "incoming audio from %s: %u bytes @ %d Hz",
              from_family_id ? from_family_id : "?",
              (unsigned)pcm_len, sample_rate_hz);
+
+    const family_t *from = (from_family_id && from_family_id[0])
+                           ? model_family_by_server_id(from_family_id) : NULL;
+
     audio_lock();
+
+    /* Save a copy for later replay from the bubble. Drop silently if the clip
+     * is bigger than our slot (server 128 KiB cap keeps this rare). */
+    if (s_replay_buf && pcm_len <= REPLAY_BUF_BYTES) {
+        memcpy(s_replay_buf, pcm, pcm_len);
+        s_replay_bytes = pcm_len;
+        s_replay_sr    = sample_rate_hz;
+    } else if (s_replay_buf) {
+        ESP_LOGW(TAG, "replay slot too small (%u > %u) — replay disabled for this clip",
+                 (unsigned)pcm_len, (unsigned)REPLAY_BUF_BYTES);
+        s_replay_bytes = 0;
+    }
+
     play_mono_pcm((const int16_t *)pcm, pcm_len, sample_rate_hz);
     audio_unlock();
+
+    /* Notify UI after playback so the bubble reflects the "available to replay" state. */
+    ui_app_on_new_message(from ? from->name : NULL);
 }
 
 #endif /* CONFIG_BULLERBY_ENABLE_NET */
@@ -365,6 +415,11 @@ void app_main(void)
     s_audio_lock = xSemaphoreCreateMutex();
 
 #if CONFIG_BULLERBY_ENABLE_NET
+    s_replay_buf = heap_caps_malloc(REPLAY_BUF_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!s_replay_buf) {
+        ESP_LOGE(TAG, "failed to alloc %u-byte replay buffer in PSRAM — replay disabled",
+                 (unsigned)REPLAY_BUF_BYTES);
+    }
     ESP_ERROR_CHECK(identity_init());
     net_set_playback_cb(on_remote_audio);
     esp_err_t nerr = net_start();

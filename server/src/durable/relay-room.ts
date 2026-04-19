@@ -21,8 +21,20 @@ interface PendingMessage {
 }
 
 export class RelayRoom extends DurableObject {
-  private sockets = new Map<string, WebSocket>();
+  /**
+   * Accepted sockets are tagged with their device id via `ctx.acceptWebSocket`,
+   * so they survive hibernation and we can look them up from a cold start with
+   * `ctx.getWebSockets(deviceId)`. No in-memory socket map.
+   */
   private pending = new Map<string, PendingMessage>();
+
+  private socketForDevice(deviceId: string): WebSocket | undefined {
+    const list = this.ctx.getWebSockets(deviceId);
+    for (const ws of list) {
+      if (ws.readyState === WebSocket.OPEN) return ws;
+    }
+    return list[0];
+  }
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
@@ -54,8 +66,8 @@ export class RelayRoom extends DurableObject {
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
-    this.ctx.acceptWebSocket(server);
-    this.sockets.set(deviceId, server);
+    /* Tag with deviceId so hibernation-safe lookup works after DO restart. */
+    this.ctx.acceptWebSocket(server, [deviceId]);
 
     server.send(
       JSON.stringify({
@@ -68,11 +80,12 @@ export class RelayRoom extends DurableObject {
   }
 
   async webSocketClose(ws: WebSocket): Promise<void> {
-    for (const [id, s] of this.sockets) {
-      if (s === ws) {
-        this.sockets.delete(id);
-        break;
-      }
+    /* Tags carry the device id; nothing to clean up in-memory because we
+     * don't hold a Map any more. Closing the socket is enough. */
+    try {
+      ws.close();
+    } catch {
+      /* already closed */
     }
   }
 
@@ -183,7 +196,7 @@ export class RelayRoom extends DurableObject {
 
     const remaining: string[] = [];
     for (const deviceId of msg.pending_device_ids) {
-      const ws = this.sockets.get(deviceId);
+      const ws = this.socketForDevice(deviceId);
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(
           JSON.stringify({
@@ -204,7 +217,7 @@ export class RelayRoom extends DurableObject {
 
   /**
    * Single alarm per DO: wake at the earliest of (retry for undelivered, TTL expiry for any message).
-   * Keeps delivered messages in `pending` until `expires_at` so signed download URLs keep working.
+   * Keeps delivered messages in `pending` until `expires_at` so the download URL keeps working.
    */
   private async recomputeAlarm(): Promise<void> {
     const now = Date.now();

@@ -80,9 +80,9 @@ Canonical layout: **[ui-spec.md](ui-spec.md) v2 (ring)** — implemented in firm
 
 ### 2.2 Audio Pipeline
 
-- **Recording:** Mic → I2S → 16kHz 16-bit PCM → Opus encode (16kbps VBR) → buffer
-- **Playback:** Opus decode → I2S → Speaker (via ES8311 + PA)
-- **Max message:** 30 seconds ≈ ~60KB Opus at 16kbps
+- **Recording:** Mic → I2S → 24 kHz 16-bit mono PCM → buffer (Opus encode is roadmap, not yet wired)
+- **Playback:** PCM → I2S → Speaker (via ES8311 + PA); receiver retunes I2S TX clock to the sender's `sample_rate_hz`
+- **Max message:** Server caps each upload at 128 KiB (~2.7 s of 24 kHz mono PCM today; ~30 s once Opus lands)
 - **Storage:** Buffer in PSRAM during record, upload immediately after
 
 ### 2.3 Connectivity
@@ -98,7 +98,7 @@ recorded clips during development).
   - JSON `{ "type": "heartbeat" }` / `{ "type": "heartbeat_ack" }` (firmware may still use ~30s cadence for UX)
   - Auto-reconnect with exponential backoff
 - **Message upload:** `POST /api/messages` — `multipart/form-data`: field **`audio`** (file), **`metadata`** (JSON string: `to_family_id`, `duration_s`, **`sample_rate_hz`** — defaults to `16000` if omitted; omit or `"ALL"`/`broadcast` for broadcast)
-- **Message download:** `GET` the **`download_url`** from the `new_message` WebSocket event — signed query **`exp`** + **`sig`**, **not** a server inbox to poll
+- **Message download:** `GET` the **`download_url`** from the `new_message` WebSocket event — **unsigned** public URL (X-Device-Id auth is identification-only — see §3.1); **not** a server inbox to poll
 - **Config sync:** After WiFi, **`GET /api/devices/{id}/config`** (authenticated) returns `family_id`, `families[]` (`id`, `name`, `icon`) — firmware applies this to the in-memory family model and refreshes the home ring (see `model_apply_server_config_json` in `firmware/main/model/model_families.c`). Until then, a static table matches the bundled JSON for offline dev.
 
 ### 2.4 Provisioning (First-Time Setup)
@@ -224,15 +224,15 @@ In-flight message (server — ephemeral only)
 - [x] **`RelayRoom`** Durable Object (`new_sqlite_classes` migration for free plan)
 - [ ] Attach **custom domain** (optional) in Cloudflare DNS for a stable device URL
 - [x] Local dev: **`cd server && npm run dev`**; deploy: **`npm run deploy`**
-- [x] **End-to-end relay script** — **`npm run test:e2e`** / **`scripts/e2e-full.mjs`** (WebSocket + upload + GET); optional check against deployed `*.workers.dev` — see [server/README.md](../server/README.md)
+- [x] **End-to-end relay script** — **`npm run test:e2e`** / **`scripts/e2e-full.mjs`** (WebSocket + upload + unsigned audio GET); optional check against deployed `*.workers.dev` — see [server/README.md](../server/README.md)
 
 ### 4.3 Development Environment
 
-- [ ] Install ESP-IDF v5.5.2+ (via espressif/vscode-esp-idf-extension or CLI)
+- [ ] Install ESP-IDF v5.5+ (via espressif/vscode-esp-idf-extension or CLI; `firmware/main/idf_component.yml` pins `>=5.5.0`)
 - [ ] Clone this repo
 - [ ] Connect ESP32-S3 device via USB
 - [ ] `idf.py set-target esp32s3 && idf.py build && idf.py flash monitor`
-- [ ] Server: **Node.js** + **`cd server && npm run dev`**; before deploy run **`cd server && npm test`** (also runs automatically via **`npm run deploy`**); optional **`cd server && npm run test:e2e`** for WebSocket + upload + signed download — see [server/README.md](../server/README.md))
+- [ ] Server: **Node.js** + **`cd server && npm run dev`**; before deploy run **`cd server && npm test`** (also runs automatically via **`npm run deploy`**); optional **`cd server && npm run test:e2e`** for WebSocket + upload + audio GET — see [server/README.md](../server/README.md))
 
 ### 4.4 Network Considerations
 
@@ -262,7 +262,7 @@ final product for families, using placeholder data.
 - [ ] **Touch / swipe (optional):** Log / use **CST816D** gesture codes for a future pager or extras — not required for tap-only ring; see [firmware-plan.md](firmware-plan.md)
 - [x] **Recording screen (UI):** Tap ring → full-screen record/stop, **30 s UI cap**, Swedish send toast → home (**I2S from record button** still Phase D — **BOOT** PCM path today)
 - [ ] **Playback product path:** Opus/PCM through speaker from chosen message; **scrollable inbox list** screen TBD (home bubble + dummy model exercise counts / tap)
-- [x] **Status:** Battery % on home; inbox **count** on center bubble (dummy `model_messages`)
+- [x] **Status:** Inbox **count** on center bubble (dummy `model_messages`)
 - [ ] **Optional:** Simulate “new message” with a button or timer to test sounds/LEDs
 
 No HTTP, WebSocket, or provisioning in this phase.
@@ -278,7 +278,7 @@ No HTTP, WebSocket, or provisioning in this phase.
 
 ### Phase 4: Firmware + server integration
 
-**Transport landed Apr 2026** (behind `CONFIG_BULLERBY_ENABLE_NET=y`): WiFi STA, `api_register` + `api_fetch_config`, `wss://…/api/ws` with 30 s heartbeat, multipart upload, signed GET, I2S playback at sender's `sample_rate_hz`. See [firmware-plan.md §Phase G](firmware-plan.md).
+**Transport landed Apr 2026** (behind `CONFIG_BULLERBY_ENABLE_NET=y`): WiFi STA, `api_register` + `api_fetch_config`, `wss://…/api/ws` with 30 s heartbeat, multipart upload, unsigned audio GET, I2S playback at sender's `sample_rate_hz`. See [firmware-plan.md §Phase G](firmware-plan.md).
 
 - [x] **Server schema aligned** — firmware family table (`ANSUND`…`TADAA`) + `server/config/bullerby.json` now carry matching `server_id`s (`family-a`…`family-h`) and 8 devices (`device-uuid-001`…`008`).
 - [x] **`sample_rate_hz` round-trip** — device uploads mono 24 kHz PCM with the field in `metadata`; server stores + forwards it on `new_message`; receiving device reclocks I2S TX so the played-back audio sounds correct regardless of sender rate.
@@ -291,7 +291,6 @@ No HTTP, WebSocket, or provisioning in this phase.
 - [ ] Captive portal WiFi provisioning + server URL in NVS (today: `Kconfig` / NVS pre-seeded).
 - [ ] OTA firmware updates via server.
 - [ ] LED feedback (recording, new message, connected/disconnected) — only `hal_led_set(true)` during capture today.
-- [x] Low battery warning on screen.
 - [ ] Edge cases: WiFi dropout retry UX, server unreachable toast, full storage.
 
 ### Phase 5: Scale to 12 Devices

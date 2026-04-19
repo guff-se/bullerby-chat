@@ -11,7 +11,7 @@ typedef struct {
     const char *from_family_id;   /**< server id, e.g. "family-b" */
     int         sample_rate_hz;   /**< defaults to 16000 when omitted */
     float       duration_s;
-    const char *download_url;     /**< signed, single-use; GET soon */
+    const char *download_url;     /**< unsigned public URL; relay holds the blob for ~10 min then drops */
 } ws_incoming_message_t;
 
 typedef void (*ws_new_message_cb_t)(const ws_incoming_message_t *msg);

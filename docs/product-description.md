@@ -16,7 +16,7 @@ Assistant Robot for Home Office School
 - **Touch:** CST816D capacitive touch over I2C (I2C_NUM_1), polled at 10ms
 - **Button:** BOOT button on GPIO 0
 - **LED:** Single LED on GPIO 48
-- **Battery:** ADC on GPIO 1, charging detect on GPIO 41
+- **Battery:** ADC on GPIO 1, charging detect on GPIO 41 *(present on board but unused — devices are wall-powered)*
 - **Connectivity:** WiFi (ESP32-S3 built-in)
 - **Storage:** SD card slot
 - **Product Size:** 55 x 48 x 33.5 mm
@@ -37,13 +37,13 @@ Board config in reference repo: `main/boards/sp-esp32-s3-1.28-box/`
 | Speaker PA      | 46   |
 | Boot Button     | 0    |
 | LED             | 48   |
-| Battery ADC     | 1    |
-| Charge Detect   | 41   |
+| Battery ADC     | 1 *(unused — wall-powered)* |
+| Charge Detect   | 41 *(unused — wall-powered)* |
 | I2C_0 (Audio)   | Board-specific SDA/SCL |
 | I2C_1 (Touch)   | Board-specific SDA/SCL |
 
 ### Build System
 
-- ESP-IDF >= 5.5.2 (CMake-based, `idf.py build`)
+- ESP-IDF >= 5.5.0 (CMake-based, `idf.py build`; pinned in `firmware/main/idf_component.yml`)
 - Dependencies via `idf_component.yml` (ESP Component Registry)
 - Custom partition table for 16MB flash

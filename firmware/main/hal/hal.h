@@ -42,11 +42,6 @@
 /* Misc */
 #define PIN_LED             48
 #define PIN_BOOT_BTN         0
-#define PIN_BATT_ADC         1
-#define PIN_CHARGE_DET      41
-
-/** Below this charge %, UI should show a low-battery warning (firmware plan). */
-#define BATTERY_PCT_LOW_WARN 15
 
 /* Codec: I2S runs at AUDIO_SAMPLE_RATE (24 kHz today). Product target for Opus
  * is often 16 kHz — resample or reclock before encode when adding Opus. */
@@ -88,9 +83,3 @@ esp_err_t hal_led_init(void);
 
 /** Set LED on/off. */
 void hal_led_set(bool on);
-
-/** Read battery voltage (0–100 percent). Returns -1 on error. */
-int hal_battery_percent(void);
-
-/** Read whether battery is charging. */
-bool hal_battery_charging(void);

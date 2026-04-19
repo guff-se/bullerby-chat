@@ -307,6 +307,7 @@ static void bubble_glow_exec(void *obj, int32_t v)
 
 static void start_bubble_pulse(lv_obj_t *bubble)
 {
+    lv_anim_del(bubble, bubble_glow_exec);
     lv_anim_t a;
     lv_anim_init(&a);
     lv_anim_set_var(&a, bubble);
@@ -338,6 +339,7 @@ static void refresh_msg_bubble(void)
 
     if (s_msg_state == MSG_NONE) {
         lv_anim_del(s_msg_bubble, bubble_glow_exec);
+        lv_obj_set_style_shadow_width(s_msg_bubble, 8, 0);
         lv_obj_add_flag(s_msg_bubble, LV_OBJ_FLAG_HIDDEN);
         return;
     }
@@ -354,6 +356,8 @@ static void refresh_msg_bubble(void)
             lv_label_set_text(s_msg_count_lbl, cnt);
             lv_obj_clear_flag(s_msg_count_lbl, LV_OBJ_FLAG_HIDDEN);
         }
+        /* Pulse only while unheard messages remain. */
+        start_bubble_pulse(s_msg_bubble);
     } else { /* MSG_PLAYED */
         lv_obj_set_style_bg_color(s_msg_bubble, lv_color_hex(COL_MSG_PLAYED), 0);
         lv_obj_set_style_shadow_color(s_msg_bubble, lv_color_hex(COL_MSG_PLAYED), 0);
@@ -361,6 +365,9 @@ static void refresh_msg_bubble(void)
         if (s_msg_count_lbl) {
             lv_obj_add_flag(s_msg_count_lbl, LV_OBJ_FLAG_HIDDEN);
         }
+        /* Steady orange, no pulse — replay is available but no new info. */
+        lv_anim_del(s_msg_bubble, bubble_glow_exec);
+        lv_obj_set_style_shadow_width(s_msg_bubble, 12, 0);
     }
 }
 
@@ -390,17 +397,19 @@ static void on_msg_bubble_tapped(lv_event_t *e)
     s_idle_ticks = 0;
 
     if (s_msg_state == MSG_AVAILABLE) {
-        if (s_has_played) {
-            ESP_LOGI(TAG, "Playing next (discarding previous played)");
-        } else {
-            ESP_LOGI(TAG, "Playing message #%lu", (unsigned long)(s_new_msg_count));
-        }
-        if (s_new_msg_count > 0) s_new_msg_count--;
+        ESP_LOGI(TAG, "Bubble tapped → replay (unread=%lu)",
+                 (unsigned long)s_new_msg_count);
+        /* One tap clears the whole unread stack. Product semantics in
+         * docs/project-plan.md §3.0: short FIFO / delete after listen. */
+        s_new_msg_count = 0;
         s_has_played = true;
-        model_inbox_mark_read(0);
     } else if (s_msg_state == MSG_PLAYED) {
-        ESP_LOGI(TAG, "Replaying last message");
+        ESP_LOGI(TAG, "Bubble tapped → replay again");
+    } else {
+        return;
     }
+
+    app_audio_request_replay();
 
     update_msg_state();
     refresh_msg_bubble();
@@ -797,6 +806,26 @@ static void build_record(void)
     lv_obj_align(s_sent_lbl, LV_ALIGN_CENTER, 0, -14);
     lv_obj_add_flag(s_sent_lbl, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(s_sent_lbl, LV_OBJ_FLAG_CLICKABLE);
+}
+
+void ui_app_on_new_message(const char *from_label)
+{
+    if (!lvgl_port_lock(5000)) {
+        ESP_LOGW(TAG, "on_new_message: lvgl lock timeout — bubble stale");
+        return;
+    }
+
+    s_new_msg_count++;
+    s_has_played   = false;
+    s_idle_ticks   = 0;
+    update_msg_state();
+    refresh_msg_bubble();
+
+    ESP_LOGI(TAG, "new message from %s (unread=%lu)",
+             from_label ? from_label : "?",
+             (unsigned long)s_new_msg_count);
+
+    lvgl_port_unlock();
 }
 
 void ui_app_show_wifi_setup(const char *ap_ssid)
