@@ -62,9 +62,10 @@ menu "Bullerby Chat"
     config BULLERBY_DEVICE_SECRET
         string "Shared device secret (matches BULLERBY_DEVICE_SECRET on the Worker)"
         depends on BULLERBY_ENABLE_NET
-        default ""
+        default "bullerby-dev-lowsec-a4f91c2e8b70"
         help
-            Do NOT commit real secrets — override via a local untracked
-            sdkconfig or NVS (future provisioning flow).
+            Dev-only shared bearer (also server/test/constants.ts). Set the same
+            value on the Worker (wrangler secret / .dev.vars). Clear or override
+            for anything beyond local bring-up.
 
 endmenu

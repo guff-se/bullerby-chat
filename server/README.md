@@ -47,7 +47,7 @@ npm run test:watch    # during development
 
 **Deployed `workers.dev` URL:** Wrangler prints it at the end of `deploy`. It matches **`https://<name>.<subdomain>.workers.dev`** where **`name`** is `wrangler.toml`’s `name` field and **`<subdomain>`** is account-specific (not in git). Confirm with `curl -sI "https://<name>.<subdomain>.workers.dev/health"` (expect `HTTP/2 200`). Firmware **Server base URL** (or NVS `bullerby` / `server_url`) must use that exact origin — no trailing slash. `wrangler deployments list` does not echo the hostname; use the deploy log or `curl` as above.
 
-Test-only secret: **`test/constants.ts`** (injected via `vitest.config.mts`); production uses **`BULLERBY_DEVICE_SECRET`** from Wrangler.
+Dev shared bearer (low security, matches firmware Kconfig default): **`bullerby-dev-lowsec-a4f91c2e8b70`** in **`test/constants.ts`** (Vitest) and **`CONFIG_BULLERBY_DEVICE_SECRET`**. Set the same value in **`BULLERBY_DEVICE_SECRET`** (Wrangler secret + **`server/.dev.vars`**) so devices and tests agree with the deployed Worker.
 
 ### End-to-end (WebSocket + upload + signed download)
 

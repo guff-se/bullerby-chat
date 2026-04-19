@@ -2,7 +2,7 @@
 
 Vitest runs inside the **Workers** runtime via `@cloudflare/vitest-pool-workers` (see [Cloudflare docs](https://developers.cloudflare.com/workers/testing/vitest-integration/)).
 
-- **`constants.ts`** — test-only `BULLERBY_DEVICE_SECRET` for Miniflare; must match `vitest.config.mts` bindings. **Not** for production.
+- **`constants.ts`** — dev `BULLERBY_DEVICE_SECRET` for Miniflare; must match `vitest.config.mts` bindings and firmware `CONFIG_BULLERBY_DEVICE_SECRET` default.
 - **`auth.test.ts`** — unit tests for `src/auth.ts` + bundled `config`.
 - **`worker.test.ts`** — integration tests using `exports.default.fetch` from `cloudflare:workers`.
 

@@ -84,6 +84,9 @@ esp_err_t api_register(void)
         .url = url,
         .method = HTTP_METHOD_POST,
         .timeout_ms = 15000,
+        /* Bearer auth: skip esp_http_client Digest/Basic retry on 401 (often no
+         * WWW-Authenticate → ESP_ERR_NOT_SUPPORTED and opaque failure). */
+        .max_authorization_retries = -1,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .event_handler = http_event_collect,
         .user_data = &sink,
@@ -100,7 +103,11 @@ esp_err_t api_register(void)
     esp_http_client_cleanup(client);
 
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "register transport failed: %s", esp_err_to_name(err));
+        if (status == 401) {
+            ESP_LOGE(TAG, "register HTTP 401 (check X-Device-Id + Bearer secret vs Worker)");
+        } else {
+            ESP_LOGE(TAG, "register transport failed: %s", esp_err_to_name(err));
+        }
         return err;
     }
     if (status != 200) {
@@ -135,6 +142,7 @@ esp_err_t api_fetch_config(char *body, size_t cap, size_t *out_len)
         .url = url,
         .method = HTTP_METHOD_GET,
         .timeout_ms = 15000,
+        .max_authorization_retries = -1,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .event_handler = http_event_collect,
         .user_data = &sink,
@@ -149,7 +157,11 @@ esp_err_t api_fetch_config(char *body, size_t cap, size_t *out_len)
     esp_http_client_cleanup(client);
 
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "config transport failed: %s", esp_err_to_name(err));
+        if (status == 401) {
+            ESP_LOGE(TAG, "config HTTP 401 (check device id + Bearer secret vs Worker)");
+        } else {
+            ESP_LOGE(TAG, "config transport failed: %s", esp_err_to_name(err));
+        }
         return err;
     }
     if (status != 200) {
@@ -248,6 +260,7 @@ esp_err_t api_post_message(const char *to_family_server_id,
         .url = url,
         .method = HTTP_METHOD_POST,
         .timeout_ms = 20000,
+        .max_authorization_retries = -1,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .event_handler = http_event_collect,
         .user_data = &sink,
@@ -269,7 +282,11 @@ esp_err_t api_post_message(const char *to_family_server_id,
     free(body);
 
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "post_message transport failed: %s", esp_err_to_name(err));
+        if (status == 401) {
+            ESP_LOGE(TAG, "post_message HTTP 401 (check device id + Bearer secret vs Worker)");
+        } else {
+            ESP_LOGE(TAG, "post_message transport failed: %s", esp_err_to_name(err));
+        }
         return err;
     }
     if (status != 200) {
@@ -295,6 +312,7 @@ esp_err_t api_download_audio(const char *signed_url,
         .url = signed_url,
         .method = HTTP_METHOD_GET,
         .timeout_ms = 20000,
+        .max_authorization_retries = -1,
         .crt_bundle_attach = esp_crt_bundle_attach,
     };
     esp_http_client_handle_t client = esp_http_client_init(&cfg);

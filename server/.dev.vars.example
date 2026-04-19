@@ -1,2 +1,2 @@
-# Copy to .dev.vars (gitignored). Required for authenticated API:
-BULLERBY_DEVICE_SECRET=
+# Copy to .dev.vars (gitignored). Use same value as CONFIG_BULLERBY_DEVICE_SECRET / test/constants.ts:
+BULLERBY_DEVICE_SECRET=bullerby-dev-lowsec-a4f91c2e8b70
