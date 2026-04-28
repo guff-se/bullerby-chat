@@ -30,7 +30,7 @@ export async function putFamilies(kv: KVNamespace, families: unknown): Promise<F
   const validated = (families as FamilyConfig[]).map((f) => ({
     id: f.id.trim(),
     name: f.name.trim(),
-    icon: f.icon.trim().slice(0, 2),
+    icon: [...f.icon.trim()].slice(0, 2).join(''),
   }));
   await kv.put(KV_KEY, JSON.stringify(validated));
   return validated;

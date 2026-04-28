@@ -100,41 +100,81 @@ function renderAdminPage(families: import("./types").FamilyConfig[]): string {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Bullerby — Families</title>
 <style>
-*{box-sizing:border-box}body{font-family:sans-serif;padding:1rem;max-width:40rem;margin:auto}
+*{box-sizing:border-box}body{font-family:sans-serif;padding:1rem;max-width:36rem;margin:auto}
 h2{margin-bottom:.5rem}
 table{width:100%;border-collapse:collapse;margin:1rem 0}
-th,td{padding:.5rem .6rem;border:1px solid #ddd;text-align:left}
+th,td{padding:.5rem .6rem;border:1px solid #ddd;text-align:left;vertical-align:middle}
 th{background:#f5f5f5;font-weight:600}
-input{width:100%;padding:.3rem .4rem;font-size:.95rem;border:1px solid #ccc;border-radius:3px}
+input.name{width:100%;padding:.3rem .4rem;font-size:.95rem;border:1px solid #ccc;border-radius:3px}
 button{padding:.4rem .9rem;font-size:.9rem;border:1px solid #999;border-radius:3px;cursor:pointer;background:#fff}
 button.danger{color:#c00;border-color:#c00}
 button.primary{background:#3366cc;color:#fff;border-color:#3366cc}
 #status{margin:.5rem 0;min-height:1.2em;color:#333}
 .ok{color:green}.err{color:red}
+.icon-btn{font-size:1.4rem;padding:.1rem .3rem;border:1px solid #ccc;border-radius:3px;cursor:pointer;background:#fff;min-width:2.4rem;text-align:center}
+#picker{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+  background:#fff;border:1px solid #ccc;border-radius:.5rem;padding:.8rem;
+  box-shadow:0 4px 20px rgba(0,0,0,.2);z-index:100;max-width:22rem;width:90vw}
+#picker-grid{display:flex;flex-wrap:wrap;gap:.3rem;max-height:14rem;overflow:auto;margin-bottom:.5rem}
+#picker-grid span{font-size:1.6rem;cursor:pointer;padding:.15rem .2rem;border-radius:4px}
+#picker-grid span:hover{background:#eee}
+#picker-close{float:right;font-size:.85rem;color:#666;cursor:pointer;border:none;background:none}
 </style></head><body>
 <h2>Bullerby — Edit Families</h2>
 <div id="status"></div>
 <table id="tbl">
-<thead><tr><th>ID</th><th>Name</th><th>Icon</th><th></th></tr></thead>
+<thead><tr><th>Name</th><th>Icon</th><th></th></tr></thead>
 <tbody id="rows"></tbody>
 </table>
 <button onclick="addRow()">+ Add family</button>
 &nbsp;
 <button class="primary" onclick="save()">Save</button>
+
+<div id="picker">
+  <button id="picker-close" onclick="closePicker()">✕ close</button>
+  <div id="picker-grid"></div>
+</div>
+
 <script>
 const TOKEN = new URLSearchParams(location.search).get('token') || '';
 let families = ${data};
+let pickerTarget = -1;
+
+const EMOJIS = '😀😁😂🤣😃😄😅😆😉😊😋😎😍🥰😘🤩🥳😜🤪😝🤑🤗🫡🤔🤫🤐😴🥱😤😠😡🤬😈👿💀☠️💩🤡👹👺👻👽🤖🎃🤓🧐😶‍🌫️🫠🫥🙃😌😒😞😔😟😕🙁🤥🥲😢😭😤🫨😮‍💨🤧🥵🥶🤢🤮🤧😷🤒🤕🤑🤠🥸🥴🫡🧑‍🎤🧑‍🎨🧑‍🏫🧑‍🍳🧑‍🌾🧑‍🔧🧑‍💻🧑‍🚀🧑‍🚒🧑‍⚕️👶🧒👦👧🧑👱👨👩🧔👴👵🧓👼🎅🤶🦸🦹🧙🧚🧛🧜🧝🧞🧟🧌💆💇🚶🧍🧎🏃💃🕺🧖🛀🧗🤸🤺🏇⛷️🏂🏋️🤼🤾🏌️🏄🚣🧘🐶🐱🐭🐹🐰🦊🐻🐼🐨🐯🦁🐮🐷🐸🐵🙈🙉🙊🐒🐔🐧🐦🐤🦆🦅🦉🦇🐺🐗🐴🦄🐝🪱🐛🦋🐌🐞🐜🦗🦂🐢🐍🦎🦖🦕🐙🦑🦐🦞🦀🐡🐠🐟🐬🐳🐋🦈🐊🐅🐆🦓🦍🦧🦣🐘🦛🦏🐪🐫🦒🦘🦬🐃🐂🐄🐎🐖🐏🐑🦙🐐🦌🐕🐩🦮🐕‍🦺🐈🐈‍⬛🪶🐓🦃🦤🦚🦜🦢🕊️🐇🦝🦨🦡🦫🦦🦥🐁🐀🐿️🦔🌵🎄🌲🌳🌴🪵🌱🌿🍀🎋🎍🪴🍁🍂🍃🪨🌾💐🌷🌹🥀🌺🌸🌼🌻🌞🌝🌛🌜🌚🌕🌖🌗🌘🌑🌒🌓🌔🌙🌟💫⭐✨🌠☀️🌤️⛅🌦️🌧️⛈️🌩️🌨️❄️☃️⛄🌪️🌈⚡🌊🌋🏔️⛰️🗻🏕️🏖️🏜️🏝️🏞️🏠🏡🏢🏣🏤🏥🏦🏧🏨🏩🏪🏫🏬🏭🏯🏰💒🗼🗽⛪🕌🛕⛩️🕍⛲⛺🌁🌃🏙️🌄🌅🌆🌇🌉🏟️🎠🎡🎢💈🎪🚂🚃🚄🚅🚆🚇🚈🚉🚊🚝🚞🚋🚌🚍🚎🚐🚑🚒🚓🚔🚕🚖🚗🚘🚙🛻🚚🛵🏍️🚲🛴🛺🚡🚠🚟🚃🚋✈️🛫🛬🛩️💺🚁🛸🚀🛸🛶⛵🚤🛥️🛳️⛴️🚢⚓🪝⛽🪂🏗️🚧⛩️⛲🎑🏞️🎆🎇🎟️🎫🎖️🏆🥇🥈🥉🏅🎗️🎪🎭🎨🎬🎤🎧🎼🎹🥁🪘🎷🎺🎸🪕🎻🪗🎲🎮🕹️🎯🎳🏒🏑🏓🏸🥊🥋🥅⛳🪃🏹🎣🤿🎽🎿🛷🥌🏋️🏊🚴🏇🧘🛹🪂🏄🤼🤸🤺🥌🏒🏓🎾⚽🏀🏈⚾🥎🎱🏐🏉🎾🥏🎿⛸️🥅⛳🎣🤿🎽🛹🏋️🏋️‍♀️🤺🥊🥋🤼🤸🤾🏌️🧗🏇🤽🤺🏄🤿🤿🧜🧚🧝🧞🧟🧌🎭🎪🎬🎤🎧🎼🎹🥁🎷🎸🎻🪗🎲🎮🕹️🎯💖💗💓💞💕💟❣️💔❤️‍🔥❤️‍🩹❤️🧡💛💚💙💜🤎🖤🤍💋💌💘💝🛑⛔🚫🚳🚭🚯🚱🚷📵🔞☢️☣️🔰♻️✅❎🔱⚜️🔰💠♾️🔘🔴🟠🟡🟢🔵🟣⚫⚪🟤🔺🔻💠🔷🔶🔹🔸▪️▫️◾◽◼️◻️🟥🟧🟨🟩🟦🟪⬛⬜🟫🔲🔳👁️‍🗨️💬💭🗯️💤🏳️🏴🚩🎌🏁🎀🎁🎊🎉🎎🎏🎐🧧🎋🎍🎑🧨✨🎆🎇🌟💫⭐🔮🪄🔭🔬🩺💊🩹🩻🩼🩺🧬🦠🧫🧪🔋🔌💡🔦🕯️🪔🧱🪟🛋️🛏️🛁🚿🪠🧴🧷🧹🧺🧻🪣🧼🫧🪥🧽🧯🛒🚪🪑🚽🪒🧻🗑️⚗️🔩🪛🔧🔨⚒️🛠️⛏️🪚🔑🗝️🔐🔏🔓🔒🧲🪜🪤🧲📱📲💻⌨️🖥️🖨️🖱️🖲️💽💾💿📀🎥📷📸📹📼📟📠📺📻🎙️🎚️🎛️🧭⏱️⏲️⏰🕰️⌚📡🔋🪫🔌💡🔦🕯️💰💴💵💶💷💸💳🪙💹📈📉📊📋📌📍🗒️🗓️📅📆🗑️📁📂🗂️🗃️🗄️📦📫📪📬📭📮✉️📧📨📩📤📥🗳️✏️✒️🖊️🖋️📝📖📚📓📔📒📕📗📘📙📃📄📑🗒️📊📈📉🗺️📰🗞️🔖🏷️🔐🔑🗝️🔨⛏️⚒️🛠️🗡️⚔️🛡️🏹🪃🔧🔩🪛🗜️🔗⛓️🪝🧲🪜🧰🪤🪣🧺🧻🚿🛁🪠🧹🧽🧴🪥🧼🪒🪞🪟🛋️🛏️🛌🧸🎎🪆🪅🪆🎭🎨🖼️🎪🎠🎡🎢🎰🚂🚃🚄🚅✈️🛸🚀🛶⛵🚤⚓🪝🏔️⛰️🌋🗻🏕️🏖️🏜️🏝️🏞️🌅🌄🌠🎑🏙️🌃🌆🌇🌉🌌🌁';
+
+function buildPicker(){
+  const grid = document.getElementById('picker-grid');
+  [...EMOJIS].forEach(e=>{
+    if(!e.trim())return;
+    const s=document.createElement('span');
+    s.textContent=e;
+    s.title=e;
+    s.onclick=()=>pickEmoji(e);
+    grid.appendChild(s);
+  });
+}
+
+function openPicker(i){
+  pickerTarget=i;
+  document.getElementById('picker').style.display='block';
+}
+function closePicker(){document.getElementById('picker').style.display='none';}
+
+function pickEmoji(e){
+  if(pickerTarget>=0){families[pickerTarget].icon=e;render();}
+  closePicker();
+}
 
 function render(){
   const tbody = document.getElementById('rows');
   tbody.innerHTML = '';
   families.forEach((f,i) => {
     const tr = document.createElement('tr');
+    const iconLabel = f.icon || '❓';
     tr.innerHTML =
-      '<td><input value="'+esc(f.id)+'" onchange="families['+i+'].id=this.value"></td>'+
-      '<td><input value="'+esc(f.name)+'" onchange="families['+i+'].name=this.value"></td>'+
-      '<td><input value="'+esc(f.icon)+'" maxlength="2" style="width:3rem" onchange="families['+i+'].icon=this.value"></td>'+
-      '<td><button class="danger" onclick="remove('+i+')">✕</button></td>';
+      '<td><input class="name" value="'+esc(f.name)+'" onchange="families['+i+'].name=this.value"></td>'+
+      '<td style="width:4rem;text-align:center"><button class="icon-btn" onclick="openPicker('+i+')">'+iconLabel+'</button></td>'+
+      '<td style="width:3rem"><button class="danger" onclick="remove('+i+')">✕</button></td>';
     tbody.appendChild(tr);
   });
 }
@@ -142,7 +182,7 @@ function render(){
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');}
 
 function addRow(){
-  families.push({id:'family-'+Date.now(),name:'',icon:''});
+  families.push({id:'family-'+Date.now(),name:'',icon:'❓'});
   render();
 }
 
@@ -160,6 +200,7 @@ async function save(){
   else{st.textContent='Error: '+j.error;st.className='err';}
 }
 
+buildPicker();
 render();
 </script></body></html>`;
 }
