@@ -1,6 +1,7 @@
 #include "wifi.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_check.h"
@@ -29,7 +30,9 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
     (void)arg;
     (void)data;
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
+        if (!s_portal_mode) {
+            esp_wifi_connect();
+        }
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         s_connected = false;
         if (s_wifi_events) {
@@ -139,6 +142,53 @@ bool wifi_sta_connect(const char *ssid, const char *password, int timeout_ms)
     return false;
 }
 
+int wifi_scan_ssids(char (*ssids)[33], int max)
+{
+    if (!ssids || max <= 0 || !s_driver_inited || !s_wifi_started) {
+        return -1;
+    }
+    wifi_scan_config_t scan = {0};
+    esp_err_t err = esp_wifi_scan_start(&scan, true);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "scan_start: %s", esp_err_to_name(err));
+        return -1;
+    }
+    uint16_t found = 0;
+    esp_wifi_scan_get_ap_num(&found);
+    if (found == 0) {
+        return 0;
+    }
+    wifi_ap_record_t *recs = calloc(found, sizeof(*recs));
+    if (!recs) {
+        return -1;
+    }
+    if (esp_wifi_scan_get_ap_records(&found, recs) != ESP_OK) {
+        free(recs);
+        return -1;
+    }
+    int out = 0;
+    for (uint16_t i = 0; i < found && out < max; i++) {
+        const char *s = (const char *)recs[i].ssid;
+        if (s[0] == '\0') {
+            continue;
+        }
+        bool dup = false;
+        for (int j = 0; j < out; j++) {
+            if (strncmp(ssids[j], s, 33) == 0) {
+                dup = true;
+                break;
+            }
+        }
+        if (dup) {
+            continue;
+        }
+        strlcpy(ssids[out], s, 33);
+        out++;
+    }
+    free(recs);
+    return out;
+}
+
 void wifi_build_setup_ap_ssid(char *out, size_t out_sz)
 {
     if (!out || out_sz == 0) {
@@ -178,9 +228,9 @@ void wifi_enter_softap(const char *ap_ssid)
     apcfg.ap.authmode = WIFI_AUTH_OPEN;
     apcfg.ap.channel = 1;
 
-    esp_err_t err = esp_wifi_set_mode(WIFI_MODE_AP);
+    esp_err_t err = esp_wifi_set_mode(WIFI_MODE_APSTA);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "set_mode AP: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "set_mode APSTA: %s", esp_err_to_name(err));
         return;
     }
     err = esp_wifi_set_config(WIFI_IF_AP, &apcfg);

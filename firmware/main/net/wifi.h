@@ -27,4 +27,11 @@ void wifi_enter_softap(const char *ap_ssid);
 bool wifi_is_connected(void);
 bool wifi_wait_connected(int timeout_ms);
 
+/**
+ * Active scan for nearby APs. Fills up to `max` unique SSIDs (33-byte slots,
+ * NUL-terminated) sorted by signal strength. Returns count, or -1 on failure.
+ * Requires SoftAP/APSTA started (e.g. after `wifi_enter_softap`).
+ */
+int wifi_scan_ssids(char (*ssids)[33], int max);
+
 #endif // NET_WIFI_H

@@ -10,7 +10,7 @@
     { "id": "family-h", "name": "TADAA",      "icon": "H" }
   ],
   "devices": [
-    { "id": "esp-3c0f02ddeec04", "family_id": "family-a" },
+    { "id": "esp-3c0f02ddec04", "family_id": "family-a" },
     { "id": "device-uuid-002", "family_id": "family-b" },
     { "id": "device-uuid-003", "family_id": "family-c" },
     { "id": "device-uuid-004", "family_id": "family-d" },

@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import WebSocket from "ws";
 
-const SENDER_ID = "esp-3c0f02ddeec04";
+const SENDER_ID = "esp-3c0f02ddec04";
 const RECEIVER_ID = "device-uuid-002";
 const TARGET_FAMILY = "family-b";
 
