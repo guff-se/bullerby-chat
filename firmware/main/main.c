@@ -376,7 +376,7 @@ static void on_remote_audio(const uint8_t *pcm, size_t pcm_len,
     audio_unlock();
 
     /* Notify UI after playback so the bubble reflects the "available to replay" state. */
-    ui_app_on_new_message(from ? from->name : NULL);
+    ui_app_on_new_message(from ? from->name : NULL, from ? from->icon : NULL);
 }
 
 #endif /* CONFIG_BULLERBY_ENABLE_NET */

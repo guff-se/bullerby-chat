@@ -3,6 +3,6 @@
 
 #include "lvgl.h"
 
-#define FAMILY_EMOJI_RING_COUNT 9
+#define FAMILY_EMOJI_RING_COUNT 17
 
 extern const lv_image_dsc_t *const family_emoji_ring[FAMILY_EMOJI_RING_COUNT];

@@ -20,20 +20,21 @@ typedef struct {
     family_t f;
     char name_storage[48];
     char sid_storage[48];
+    char icon_storage[16];
 } family_dyn_t;
 
 uint8_t model_my_family_id = 0;
 
 static const family_t k_families_static[] = {
-    {1, "ANSUND",     false, "family-a"},
-    {2, "BERGMAN",    false, "family-b"},
-    {3, "AMANDA",     false, "family-c"},
-    {4, "MATTIS",     false, "family-d"},
-    {5, "ANNIKA",     false, "family-e"},
-    {6, "NAVID",      false, "family-f"},
-    {7, "LINDMARKER", false, "family-g"},
-    {8, "TADAA",      false, "family-h"},
-    {9, "ALLA",       true,  NULL},
+    {1, "ANSUND",     "", false, "device-ansund"},
+    {2, "BERGMAN",    "", false, "device-bergman"},
+    {3, "AMANDA",     "", false, "device-amanda"},
+    {4, "MATTIS",     "", false, "device-mattis"},
+    {5, "ANNIKA",     "", false, "device-annika"},
+    {6, "NAVID",      "", false, "device-navid"},
+    {7, "LINDMARKER", "", false, "device-lindmarker"},
+    {8, "TADAA",      "", false, "device-tadaa"},
+    {9, "ALLA",       "📣", true, NULL},
 };
 
 #define STATIC_FAMILY_COUNT (sizeof(k_families_static) / sizeof(k_families_static[0]))
@@ -252,16 +253,23 @@ esp_err_t model_apply_server_config_json(const char *json)
         }
         strlcpy(block[i].sid_storage, jid->valuestring, sizeof(block[i].sid_storage));
         strlcpy(block[i].name_storage, jname->valuestring, sizeof(block[i].name_storage));
+        const cJSON *jicon = cJSON_GetObjectItemCaseSensitive(item, "icon");
+        if (cJSON_IsString(jicon) && jicon->valuestring) {
+            strlcpy(block[i].icon_storage, jicon->valuestring, sizeof(block[i].icon_storage));
+        }
         block[i].f.id = (uint8_t)(i + 1);
         block[i].f.name = block[i].name_storage;
+        block[i].f.icon = block[i].icon_storage;
         block[i].f.server_id = block[i].sid_storage;
         block[i].f.is_broadcast = false;
     }
 
     family_dyn_t *alla = &block[n];
     strlcpy(alla->name_storage, "ALLA", sizeof(alla->name_storage));
+    strlcpy(alla->icon_storage, "📣", sizeof(alla->icon_storage));
     alla->f.id = (uint8_t)(n + 1);
     alla->f.name = alla->name_storage;
+    alla->f.icon = alla->icon_storage;
     alla->f.server_id = NULL;
     alla->f.is_broadcast = true;
 

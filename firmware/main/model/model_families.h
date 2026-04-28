@@ -8,11 +8,11 @@
 /** One family or the broadcast row. */
 typedef struct {
     uint8_t id;
-    /** Display name (home ring uses raster emoji assets, see family_emoji_assets.h) */
     const char *name;
-    /** ALLA — sänd till alla */
+    /** UTF-8 emoji string (e.g. "😀"); maps to a pre-rasterized asset via icon_to_asset_index(). */
+    const char *icon;
     bool is_broadcast;
-    /** Stable id used by the server API (`family-a`, `family-b`, ...); NULL for broadcast. */
+    /** Stable id used by the server API (device id or NULL for broadcast). */
     const char *server_id;
 } family_t;
 

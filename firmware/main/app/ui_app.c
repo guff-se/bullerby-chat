@@ -104,6 +104,8 @@ static size_t    s_ring_n;
 static lv_obj_t *s_msg_bubble;
 static lv_obj_t *s_msg_icon_lbl;
 static lv_obj_t *s_msg_count_lbl;
+static lv_obj_t *s_msg_from_img;
+static char      s_msg_from_icon[16];
 
 #if CONFIG_BULLERBY_ENABLE_NET
 /** Last value applied by `apply_home_intercom_visual_state` (LVGL thread only). */
@@ -226,6 +228,26 @@ static void home_ring_geometry(int n, int *out_r, int *out_dia)
     }
     *out_dia = idia;
     *out_r = (int)lroundf(r);
+}
+
+/* Must match EMOJIS list in scripts/gen_family_emoji_assets.py (indices 0-15 + 16=📣). */
+static const char *const k_icon_emojis[] = {
+    "😀", "😃", "😄", "😁", "😊", "🙂", "😇", "🎉",
+    "🌟", "🦊", "🐻", "🐱", "🐶", "🎵", "🚀", "🌈",
+    "📣",
+};
+
+static int icon_to_asset_index(const char *icon)
+{
+    if (!icon || !icon[0]) {
+        return -1;
+    }
+    for (int i = 0; i < FAMILY_EMOJI_RING_COUNT; i++) {
+        if (strcmp(icon, k_icon_emojis[i]) == 0) {
+            return i;
+        }
+    }
+    return -1;
 }
 
 /** Target emoji box side in px: proportional to `ring_dia`, 50% larger than 32 px at `RING_REF_DIA`. */
@@ -355,6 +377,17 @@ static void refresh_msg_bubble(void)
 
     lv_obj_clear_flag(s_msg_bubble, LV_OBJ_FLAG_HIDDEN);
 
+    /* Update sender emoji image */
+    if (s_msg_from_img) {
+        int asset = icon_to_asset_index(s_msg_from_icon);
+        if (asset >= 0) {
+            lv_image_set_src(s_msg_from_img, family_emoji_ring[asset]);
+            lv_obj_clear_flag(s_msg_from_img, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(s_msg_from_img, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
     if (s_msg_state == MSG_AVAILABLE) {
         lv_obj_set_style_bg_color(s_msg_bubble, lv_color_hex(COL_MSG_READY), 0);
         lv_obj_set_style_shadow_color(s_msg_bubble, lv_color_hex(COL_MSG_READY), 0);
@@ -365,7 +398,6 @@ static void refresh_msg_bubble(void)
             lv_label_set_text(s_msg_count_lbl, cnt);
             lv_obj_clear_flag(s_msg_count_lbl, LV_OBJ_FLAG_HIDDEN);
         }
-        /* Pulse only while unheard messages remain. */
         start_bubble_pulse(s_msg_bubble);
     } else { /* MSG_PLAYED */
         lv_obj_set_style_bg_color(s_msg_bubble, lv_color_hex(COL_MSG_PLAYED), 0);
@@ -374,7 +406,6 @@ static void refresh_msg_bubble(void)
         if (s_msg_count_lbl) {
             lv_obj_add_flag(s_msg_count_lbl, LV_OBJ_FLAG_HIDDEN);
         }
-        /* Steady orange, no pulse — replay is available but no new info. */
         lv_anim_del(s_msg_bubble, bubble_glow_exec);
         lv_obj_set_style_shadow_width(s_msg_bubble, 12, 0);
     }
@@ -633,8 +664,12 @@ static void home_ring_build_on_screen(lv_obj_t *scr)
                             (void *)(uintptr_t)model_idx);
 
         lv_obj_t *em = lv_image_create(circ);
-        if (model_idx < FAMILY_EMOJI_RING_COUNT) {
-            lv_image_set_src(em, family_emoji_ring[model_idx]);
+        {
+            int asset = icon_to_asset_index(f->icon);
+            if (asset < 0) {
+                asset = (int)(model_idx % FAMILY_EMOJI_RING_COUNT);
+            }
+            lv_image_set_src(em, family_emoji_ring[asset]);
         }
         {
             int em_sz = ring_emoji_box_px(ring_dia);
@@ -744,27 +779,35 @@ static void build_home(void)
     lv_obj_add_event_cb(s_msg_bubble, on_msg_bubble_tapped, LV_EVENT_CLICKED, NULL);
     no_scroll(s_msg_bubble);
 
-    /* Play / loop icon + count (large; default theme font is 14 px) */
+    /* Sender emoji (top half of bubble; hidden until a message arrives) */
+    s_msg_from_img = lv_image_create(s_msg_bubble);
+    lv_image_set_scale(s_msg_from_img, 192); /* 32 px asset → ~24 px */
+    lv_image_set_antialias(s_msg_from_img, true);
+    lv_obj_add_flag(s_msg_from_img, LV_OBJ_FLAG_EVENT_BUBBLE | LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_msg_from_img, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_align(s_msg_from_img, LV_ALIGN_CENTER, 0, -18);
+
+    /* Play / loop symbol (bottom half) */
     s_msg_icon_lbl = lv_label_create(s_msg_bubble);
     lv_label_set_text(s_msg_icon_lbl, LV_SYMBOL_PLAY);
-    lv_obj_set_style_text_font(s_msg_icon_lbl, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_font(s_msg_icon_lbl, &lv_font_montserrat_20_latin1, 0);
     lv_obj_set_style_text_color(s_msg_icon_lbl, lv_color_hex(0x1a1400), 0);
     lv_obj_set_style_bg_opa(s_msg_icon_lbl, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(s_msg_icon_lbl, 0, 0);
     lv_obj_add_flag(s_msg_icon_lbl, LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_clear_flag(s_msg_icon_lbl, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_align(s_msg_icon_lbl, LV_ALIGN_CENTER, 0, -12);
+    lv_obj_align(s_msg_icon_lbl, LV_ALIGN_CENTER, 0, 14);
 
-    /* Message count number */
+    /* Message count badge (top-right corner) */
     s_msg_count_lbl = lv_label_create(s_msg_bubble);
     lv_label_set_text(s_msg_count_lbl, "0");
-    lv_obj_set_style_text_font(s_msg_count_lbl, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_font(s_msg_count_lbl, &lv_font_montserrat_14_latin1, 0);
     lv_obj_set_style_text_color(s_msg_count_lbl, lv_color_hex(0x1a1400), 0);
     lv_obj_set_style_bg_opa(s_msg_count_lbl, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(s_msg_count_lbl, 0, 0);
     lv_obj_add_flag(s_msg_count_lbl, LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_clear_flag(s_msg_count_lbl, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_align(s_msg_count_lbl, LV_ALIGN_CENTER, 0, 14);
+    lv_obj_align(s_msg_count_lbl, LV_ALIGN_TOP_RIGHT, -6, 8);
 
 #if CONFIG_BULLERBY_ENABLE_NET
     s_disconnect_lbl = lv_label_create(s_scr_home);
@@ -888,7 +931,7 @@ static void build_record(void)
     lv_obj_clear_flag(s_sent_lbl, LV_OBJ_FLAG_CLICKABLE);
 }
 
-void ui_app_on_new_message(const char *from_label)
+void ui_app_on_new_message(const char *from_label, const char *from_icon)
 {
     if (!lvgl_port_lock(5000)) {
         ESP_LOGW(TAG, "on_new_message: lvgl lock timeout — bubble stale");
@@ -902,14 +945,16 @@ void ui_app_on_new_message(const char *from_label)
     }
 #endif
 
+    strlcpy(s_msg_from_icon, from_icon ? from_icon : "", sizeof(s_msg_from_icon));
     s_new_msg_count++;
     s_has_played   = false;
     s_idle_ticks   = 0;
     update_msg_state();
     refresh_msg_bubble();
 
-    ESP_LOGI(TAG, "new message from %s (unread=%lu)",
+    ESP_LOGI(TAG, "new message from %s %s (unread=%lu)",
              from_label ? from_label : "?",
+             from_icon  ? from_icon  : "",
              (unsigned long)s_new_msg_count);
 
     lvgl_port_unlock();

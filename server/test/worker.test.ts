@@ -32,7 +32,7 @@ describe("Worker HTTP (integration)", () => {
       families: { id: string }[];
     };
     expect(body.device_id).toBe("esp-3c0f02ddec04");
-    expect(body.family_id).toBe("family-a");
+    expect(body.family_id).toBe("esp-3c0f02ddec04");
     expect(body.families.length).toBeGreaterThan(0);
   });
 
@@ -46,6 +46,6 @@ describe("Worker HTTP (integration)", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { ok: boolean; family_id: string };
     expect(body.ok).toBe(true);
-    expect(body.family_id).toBe("family-b");
+    expect(body.family_id).toBe("device-uuid-002");
   });
 });

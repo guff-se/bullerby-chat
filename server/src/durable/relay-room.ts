@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { config, deviceById, deviceIdForFamily, familyById } from "../config";
+import { config, deviceById } from "../config";
 import type { PostMessagePayload } from "../types";
 
 const TTL_MS = 10 * 60 * 1000;
@@ -112,7 +112,7 @@ export class RelayRoom extends DurableObject {
     }
 
     const fromDev = deviceById(body.from_device_id);
-    if (!fromDev || fromDev.family_id !== body.from_family_id) {
+    if (!fromDev || fromDev.id !== body.from_family_id) {
       return Response.json({ error: "sender_mismatch" }, { status: 400 });
     }
 
@@ -178,17 +178,15 @@ export class RelayRoom extends DurableObject {
   ): string[] {
     const out: string[] = [];
     if (broadcast) {
-      for (const f of config.families) {
-        if (f.id === fromFamilyId) continue;
-        const did = deviceIdForFamily(f.id);
-        if (did) out.push(did);
+      for (const d of config.devices) {
+        if (d.id === fromFamilyId) continue;
+        out.push(d.id);
       }
       return out;
     }
     if (!toFamilyId || toFamilyId === fromFamilyId) return [];
-    if (!familyById(toFamilyId)) return [];
-    const did = deviceIdForFamily(toFamilyId);
-    return did ? [did] : [];
+    if (!deviceById(toFamilyId)) return [];
+    return [toFamilyId];
   }
 
   private async deliverRound(msg: PendingMessage): Promise<void> {

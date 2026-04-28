@@ -1,22 +1,12 @@
 {
-  "families": [
-    { "id": "family-a", "name": "ANSUND",     "icon": "A" },
-    { "id": "family-b", "name": "BERGMAN",    "icon": "B" },
-    { "id": "family-c", "name": "AMANDA",     "icon": "C" },
-    { "id": "family-d", "name": "MATTIS",     "icon": "D" },
-    { "id": "family-e", "name": "ANNIKA",     "icon": "E" },
-    { "id": "family-f", "name": "NAVID",      "icon": "F" },
-    { "id": "family-g", "name": "LINDMARKER", "icon": "G" },
-    { "id": "family-h", "name": "TADAA",      "icon": "H" }
-  ],
   "devices": [
-    { "id": "esp-3c0f02ddec04", "family_id": "family-a" },
-    { "id": "device-uuid-002", "family_id": "family-b" },
-    { "id": "device-uuid-003", "family_id": "family-c" },
-    { "id": "device-uuid-004", "family_id": "family-d" },
-    { "id": "device-uuid-005", "family_id": "family-e" },
-    { "id": "device-uuid-006", "family_id": "family-f" },
-    { "id": "device-uuid-007", "family_id": "family-g" },
-    { "id": "esp-3c0f02df0618", "family_id": "family-h" }
+    { "id": "esp-3c0f02ddec04", "name": "ANSUND",     "icon": "😀" },
+    { "id": "device-uuid-002", "name": "BERGMAN",    "icon": "😃" },
+    { "id": "device-uuid-003", "name": "AMANDA",     "icon": "😄" },
+    { "id": "device-uuid-004", "name": "MATTIS",     "icon": "😁" },
+    { "id": "device-uuid-005", "name": "ANNIKA",     "icon": "😊" },
+    { "id": "device-uuid-006", "name": "NAVID",      "icon": "🙂" },
+    { "id": "device-uuid-007", "name": "LINDMARKER", "icon": "😇" },
+    { "id": "esp-3c0f02df0618", "name": "TADAA",      "icon": "🎉" }
   ]
 }

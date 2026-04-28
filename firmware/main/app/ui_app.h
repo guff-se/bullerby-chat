@@ -19,5 +19,6 @@ void ui_app_rebuild_home_ring(void);
  * NOT from an LVGL timer callback.
  *
  * `from_label` is the display name (e.g. "BERGMAN") or NULL if unknown.
+ * `from_icon`  is the UTF-8 emoji string (e.g. "😊") or NULL if unknown.
  */
-void ui_app_on_new_message(const char *from_label);
+void ui_app_on_new_message(const char *from_label, const char *from_icon);

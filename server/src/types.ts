@@ -1,17 +1,14 @@
-/** Bundled git-sourced config (see docs/project-plan.md §3.4). */
-export interface FamilyConfig {
+/** One device = one family. */
+export interface DeviceConfig {
   id: string;
   name: string;
   icon: string;
 }
 
-export interface DeviceConfig {
-  id: string;
-  family_id: string;
-}
+/** Shape of the families array sent to firmware (same fields as DeviceConfig). */
+export type FamilyConfig = DeviceConfig;
 
 export interface BullerbyConfig {
-  families: FamilyConfig[];
   devices: DeviceConfig[];
 }
 
