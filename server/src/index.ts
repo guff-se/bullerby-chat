@@ -1,6 +1,7 @@
 import { RelayRoom } from "./durable/relay-room";
 import { config, deviceById } from "./config";
 import { verifyDeviceAuth } from "./auth";
+import { getFamilies, putFamilies, getConfig } from "./config-store";
 import type { MessageMetadata, PostMessagePayload } from "./types";
 
 export { RelayRoom };
@@ -83,6 +84,86 @@ async function handlePostMessage(
   );
 }
 
+function checkAdminToken(request: Request, env: Env): boolean {
+  const url = new URL(request.url);
+  const token = env.ADMIN_TOKEN;
+  if (!token) return false;
+  return (
+    url.searchParams.get("token") === token ||
+    request.headers.get("X-Admin-Token") === token
+  );
+}
+
+function renderAdminPage(families: import("./types").FamilyConfig[]): string {
+  const data = JSON.stringify(families);
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bullerby — Families</title>
+<style>
+*{box-sizing:border-box}body{font-family:sans-serif;padding:1rem;max-width:40rem;margin:auto}
+h2{margin-bottom:.5rem}
+table{width:100%;border-collapse:collapse;margin:1rem 0}
+th,td{padding:.5rem .6rem;border:1px solid #ddd;text-align:left}
+th{background:#f5f5f5;font-weight:600}
+input{width:100%;padding:.3rem .4rem;font-size:.95rem;border:1px solid #ccc;border-radius:3px}
+button{padding:.4rem .9rem;font-size:.9rem;border:1px solid #999;border-radius:3px;cursor:pointer;background:#fff}
+button.danger{color:#c00;border-color:#c00}
+button.primary{background:#3366cc;color:#fff;border-color:#3366cc}
+#status{margin:.5rem 0;min-height:1.2em;color:#333}
+.ok{color:green}.err{color:red}
+</style></head><body>
+<h2>Bullerby — Edit Families</h2>
+<div id="status"></div>
+<table id="tbl">
+<thead><tr><th>ID</th><th>Name</th><th>Icon</th><th></th></tr></thead>
+<tbody id="rows"></tbody>
+</table>
+<button onclick="addRow()">+ Add family</button>
+&nbsp;
+<button class="primary" onclick="save()">Save</button>
+<script>
+const TOKEN = new URLSearchParams(location.search).get('token') || '';
+let families = ${data};
+
+function render(){
+  const tbody = document.getElementById('rows');
+  tbody.innerHTML = '';
+  families.forEach((f,i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td><input value="'+esc(f.id)+'" onchange="families['+i+'].id=this.value"></td>'+
+      '<td><input value="'+esc(f.name)+'" onchange="families['+i+'].name=this.value"></td>'+
+      '<td><input value="'+esc(f.icon)+'" maxlength="2" style="width:3rem" onchange="families['+i+'].icon=this.value"></td>'+
+      '<td><button class="danger" onclick="remove('+i+')">✕</button></td>';
+    tbody.appendChild(tr);
+  });
+}
+
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');}
+
+function addRow(){
+  families.push({id:'family-'+Date.now(),name:'',icon:''});
+  render();
+}
+
+function remove(i){families.splice(i,1);render();}
+
+async function save(){
+  const st=document.getElementById('status');
+  st.textContent='Saving…';st.className='';
+  const res = await fetch('/api/admin/families?token='+encodeURIComponent(TOKEN),{
+    method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(families)
+  });
+  const j = await res.json();
+  if(res.ok){families=j.families;render();st.textContent='Saved ✓';st.className='ok';}
+  else{st.textContent='Error: '+j.error;st.className='err';}
+}
+
+render();
+</script></body></html>`;
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -136,10 +217,11 @@ export default {
       if (!dev) {
         return new Response("Not found", { status: 404 });
       }
+      const liveConfig = await getConfig(env.CONFIG);
       return Response.json({
         device_id: dev.id,
         family_id: dev.family_id,
-        families: config.families,
+        families: liveConfig.families,
       });
     }
 
@@ -160,6 +242,36 @@ export default {
           { method: "GET" }
         )
       );
+    }
+
+    // Admin: serve editor page
+    if (url.pathname === "/admin" && request.method === "GET") {
+      if (!checkAdminToken(request, env)) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+      const families = await getFamilies(env.CONFIG);
+      return new Response(renderAdminPage(families), {
+        headers: { "Content-Type": "text/html; charset=utf-8" },
+      });
+    }
+
+    // Admin: save families
+    if (url.pathname === "/api/admin/families" && request.method === "PUT") {
+      if (!checkAdminToken(request, env)) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+      let body: unknown;
+      try {
+        body = await request.json();
+      } catch {
+        return Response.json({ error: "invalid json" }, { status: 400 });
+      }
+      try {
+        const saved = await putFamilies(env.CONFIG, body);
+        return Response.json({ ok: true, families: saved });
+      } catch (e: unknown) {
+        return Response.json({ error: String(e) }, { status: 400 });
+      }
     }
 
     return new Response("Not found", { status: 404 });

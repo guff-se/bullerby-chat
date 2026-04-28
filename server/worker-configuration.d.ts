@@ -8,6 +8,8 @@ declare namespace Cloudflare {
 	}
 	interface Env {
 		RELAY: DurableObjectNamespace<import("./src/index").RelayRoom>;
+		CONFIG: KVNamespace;
+		ADMIN_TOKEN: string;
 	}
 }
 interface Env extends Cloudflare.Env {}
